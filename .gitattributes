@@ -1,0 +1,4 @@
+# 发布源仓库：行尾一律 LF（安装链按字节算 sha256，CRLF 重写会让清单全体失配）
+* text=auto eol=lf
+*.png binary
+*.ico binary
