@@ -47,11 +47,16 @@ plugin-market/
 
 ## 指向本仓库
 
-默认索引 URL 为 `https://raw.githubusercontent.com/omp-desk/plugin-market/main/index.json`。
-仓库名/组织不同，或需要镜像（raw.githubusercontent.com 在部分地区不稳定，
-可换 gitee raw / 自建静态源——服务只要求 index.json 是 JSON 且同目录可取文件），
-用环境变量覆盖：
+桌面端默认源走 **jsDelivr gh 镜像**（`https://cdn.jsdelivr.net/gh/LeeSeaside/plugin-market@main/index.json`）——
+`raw.githubusercontent.com` 直连在国内间歇超时，且 Node 原生 fetch 不读系统代理；
+jsDelivr 全球 CDN 直连稳定。代价是分支内容有约 12h 边缘缓存——**发布脚本已内置
+purge 调用**（每次 build-index 推送后跑一遍即即时刷新）。
+
+需要换回 raw（实时性好，适合海外网络）或指向镜像/自建静态源，用环境变量覆盖：
 
 ```
-OMP_DESK_PLUGIN_INDEX_URL=https://<your-host>/index.json
+OMP_DESK_PLUGIN_INDEX_URL=https://raw.githubusercontent.com/LeeSeaside/plugin-market/main/index.json
 ```
+
+发布完整流程：改包 → `node scripts/build-index.mjs` → `git add -A && git commit && git push`
+→ **再跑一遍 `node scripts/build-index.mjs` 触发 purge**（或手动 curl purge URL）。

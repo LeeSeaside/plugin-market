@@ -115,3 +115,18 @@ const index = {
 };
 writeFileSync(join(root, 'index.json'), JSON.stringify(index, null, 2) + '\n', 'utf8');
 console.log(`index.json written · ${plugins.length} plugins`);
+
+// ---- jsDelivr 边缘缓存 purge（@main 分支内容有约 12h 缓存，发布后必须刷）----
+// 失败仅警告不阻塞：purge 不通时 jsDelivr 到期也会自行刷新，只是有延迟。
+const GH_BASE = 'https://cdn.jsdelivr.net/gh/LeeSeaside/plugin-market@main';
+const PURGE_BASE = 'https://purge.jsdelivr.net/gh/LeeSeaside/plugin-market@main';
+const purgeTargets = ['index.json', ...plugins.flatMap((p) => p.files.map((f) => `${p.path}/${f.name}`))];
+for (const t of purgeTargets) {
+  try {
+    const res = await fetch(`${PURGE_BASE}/${t}`, { signal: AbortSignal.timeout(10_000) });
+    console.log(`purge ${t}: HTTP ${res.status}`);
+  } catch (e) {
+    console.warn(`purge ${t} 失败（忽略，等待 jsDelivr 自行刷新）: ${e?.cause?.code ?? e?.message ?? e}`);
+  }
+}
+console.log(`jsDelivr 预览: ${GH_BASE}/index.json`);
