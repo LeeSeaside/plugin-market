@@ -16,7 +16,9 @@ plugin-market/
 │   ├── manifest.json
 │   ├── client.js
 │   └── host.js
-└── locus-usage/
+├── locus-usage/
+│   └── …
+└── locus-terminal/       ← 终端插件（真 PTY，@lydell/node-pty 由宿主 host.require 提供）
     └── …
 ```
 

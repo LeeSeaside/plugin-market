@@ -6,6 +6,7 @@
   "description": "随应用分发的用量面板：逐日成本折线、贡献热力图、限额窗口与模型性能（TPS/TTFT）。Host 半只读内核 agent.db（usage_cost_history / client_usage / usage_history / model_perf），只跑 SELECT。",
   "entry": { "client": "client.js" },
   "hostEntry": "host.js",
+  "permissions": ["capability:omp:plugin-host:invoke", "theme:read"],
   "contributes": {
     "panes": [
       { "id": "locus.usage", "title": "用量统计", "order": 7 }
