@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "updatedAt": "2026-09-28T09:10:21.088Z",
+  "plugins": [
+    {
+      "id": "com.locus.git",
+      "name": "Git 工作台",
+      "version": "1.0.0",
+      "apiVersion": 1,
+      "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
+      "path": "locus-git",
+      "manifest": {
+        "id": "com.locus.git",
+        "name": "Git 工作台",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
+        "entry": {
+          "client": "client.js"
+        },
+        "hostEntry": "host.js",
+        "contributes": {
+          "panes": [
+            {
+              "id": "locus.git",
+              "title": "Git",
+              "order": 6
+            }
+          ]
+        }
+      },
+      "files": [
+        {
+          "name": "client.js",
+          "sha256": "15d56b80dd50a9e2321ab4ff16bc517a14a601fbc0bec68965e9bdcf43a93077",
+          "bytes": 11064
+        },
+        {
+          "name": "host.js",
+          "sha256": "c8fb1d3428a977576aff10ca4d5c3fdca17649a117c8a0fa6ba559a87cd9fefb",
+          "bytes": 7532
+        },
+        {
+          "name": "manifest.json",
+          "sha256": "539ee40c6c4d2edd7f6a992cb47e79bd914da86bfd7d42cb56d4a23059aa7e5a",
+          "bytes": 521
+        }
+      ]
+    },
+    {
+      "id": "com.locus.usage",
+      "name": "用量统计",
+      "version": "1.0.0",
+      "apiVersion": 1,
+      "description": "随应用分发的用量面板：逐日成本折线、贡献热力图、限额窗口与模型性能（TPS/TTFT）。Host 半只读内核 agent.db（usage_cost_history / client_usage / usage_history / model_perf），只跑 SELECT。",
+      "path": "locus-usage",
+      "manifest": {
+        "id": "com.locus.usage",
+        "name": "用量统计",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "description": "随应用分发的用量面板：逐日成本折线、贡献热力图、限额窗口与模型性能（TPS/TTFT）。Host 半只读内核 agent.db（usage_cost_history / client_usage / usage_history / model_perf），只跑 SELECT。",
+        "entry": {
+          "client": "client.js"
+        },
+        "hostEntry": "host.js",
+        "contributes": {
+          "panes": [
+            {
+              "id": "locus.usage",
+              "title": "用量统计",
+              "order": 7
+            }
+          ]
+        }
+      },
+      "files": [
+        {
+          "name": "client.js",
+          "sha256": "e0e25ca2e35ba7cc0ca6f80b77a22e5f45d9e7ca204bfdb1cda00eff081b13bc",
+          "bytes": 10660
+        },
+        {
+          "name": "host.js",
+          "sha256": "d1ccc96fc2dcbda6540017cb990630eae46e3bbaad44239aad28b638ecf52c2a",
+          "bytes": 5581
+        },
+        {
+          "name": "manifest.json",
+          "sha256": "25b94e87ef310d2ad277313a7cd21380db5180c0d1f6d9851f4dc2ca88306324",
+          "bytes": 526
+        }
+      ]
+    }
+  ]
+}
