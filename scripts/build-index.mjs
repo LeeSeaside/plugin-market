@@ -27,6 +27,7 @@ const ID_RE = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/;
 /** 与服务端 REPO_PATH_RE 同款：市场 path（=仓库目录名）禁点号，故目录名
  *  不能用带点的插件 id —— id 带点、目录无点（如 com.locus.git → locus-git）。 */
 const REPO_PATH_RE = /^[A-Za-z0-9][A-Za-z0-9/_-]*$/;
+// template/ 是官方第三方开发模板（复制起点，不是可安装商品），不进索引。
 const SKIP_DIRS = new Set(['scripts', '.git', 'node_modules']);
 const SKIP_FILES = new Set(['index.json', 'README.md', '.gitignore', 'LICENSE']);
 

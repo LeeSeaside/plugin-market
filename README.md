@@ -4,6 +4,11 @@ OMP Desk 插件市场的官方索引仓库。桌面端扩展 Hub 的「市场」
 安装走 **逐文件 raw 下载 + sha256 校验**（`docs/plugin-market-design.md` §6–§9，
 `backend/src/services/plugin-market-service.ts`）。
 
+**信任语义（2026-09-29 拍板）**：授权机制已整体移除——插件放进插件目录即加载
+（市场安装 / 目录导入 / 手工创建同权，装完即生效）。本仓库作为内置官方源，
+sha256 逐文件校验锚定内容；**合并进本仓库 = 进入用户的内置市场，评审是唯一的门**。
+用户也可以在扩展页「添加市场源」挂任意第三方 index.json 仓库（添加即识别）。
+
 ## 仓库布局
 
 ```
@@ -24,6 +29,21 @@ plugin-market/
 
 **目录名与插件 id 是两回事**：`path` 白名单 `[A-Za-z0-9/_-]`（禁点号），
 插件 id 必须带点（如 `com.locus.git`）。目录用无点短名，id 写在 manifest 里。
+
+## 开发你自己的插件（第三方）
+
+**推荐路径：用内置技能**。在 Locus 对话里调用「创建插件」技能（共享技能库里的
+`create-plugin`，随应用内置）——它会按官方契约生成 manifest.json + client.js
+（可选 host.js）并放进插件目录，放进去即生效（扩展页「重新扫描」或重启可见）。
+
+手工开发时记住三条契约即可（技能里有完整模板）：
+- `manifest.json`：id 反向域名全局唯一；`contributes.panes[].id` 与
+  `ctx.ui.registerPane` 注册的 paneId 一致；`permissions` 只声明真用到的
+  （`capability:omp:plugin-host:invoke` 是渲染半调宿主桥的唯一凭据）。
+- `client.js`：`window.__OMP_PLUGIN__({ apply(ctx) })` 唯一入口；`ctx.React` /
+  `ctx.beui` / `ctx.api` / `ctx.ui` / `ctx.id`；样式用内联 CSS 变量。
+- `host.js`（可选）：ESM `activate(host)`，跑在每插件一进程的全权 Node 子进程，
+  返回 `{ request(method, params) }` 供渲染半经 `omp:plugin-host:invoke` 调用。
 
 ## 发布 / 更新流程
 
