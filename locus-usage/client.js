@@ -17,6 +17,42 @@ window.__OMP_PLUGIN__({
     var h = R.createElement;
     var PLUGIN_ID = ctx.id;
 
+    /* ── 动效样式表（mono-charts 观感：柱生长 / 弧线描绘 / 格子弹入）。
+       插件不走 StyleX 构建线，注入一次共享 <style>；类名 lu-* 自带命名空间。
+       全部 fill: backwards —— 动画结束后交还自然态，hover 过渡不被锁死。
+       prefers-reduced-motion 下一律禁用。 ── */
+    var MOTION_STYLE_ID = 'locus-usage-motion';
+    var MOTION_CSS = [
+      '@keyframes lu-draw { from { stroke-dashoffset: var(--lu-len, 1); } }',
+      '@keyframes lu-grow { from { transform: scaleY(0); } }',
+      '@keyframes lu-pop { from { transform: scale(.4); opacity: 0; } }',
+      '@keyframes lu-fade { from { opacity: 0; } }',
+      '@keyframes lu-rise { from { opacity: 0; transform: translateY(7px); } }',
+      '.lu-bar { transform-box: fill-box; transform-origin: 50% 100%;',
+      '  animation: lu-grow .55s cubic-bezier(.22,1,.36,1) backwards;',
+      '  transition: opacity .16s ease, transform .16s ease; }',
+      '.lu-bar:hover { transform: scaleY(1.045); }',
+      '.lu-dot { animation: lu-fade .4s ease backwards; }',
+      '.lu-line { stroke-dasharray: 1; animation: lu-draw 1s cubic-bezier(.4,0,.2,1) .1s backwards; }',
+      '.lu-area { animation: lu-fade .7s ease .5s backwards; }',
+      '.lu-arc { animation: lu-draw .9s cubic-bezier(.4,0,.2,1) backwards; }',
+      '.lu-cell { transform-box: fill-box; transform-origin: 50% 50%;',
+      '  animation: lu-pop .32s cubic-bezier(.22,1,.36,1) backwards;',
+      '  transition: transform .15s ease; }',
+      '.lu-cell:hover { transform: scale(1.22); }',
+      '.lu-rise { animation: lu-rise .4s cubic-bezier(.22,1,.36,1) backwards; }',
+      '@media (prefers-reduced-motion: reduce) {',
+      '  .lu-bar,.lu-dot,.lu-line,.lu-area,.lu-arc,.lu-cell,.lu-rise { animation: none; }',
+      '  .lu-bar,.lu-cell { transition: none; }',
+      '}',
+    ].join('\n');
+    if (typeof document !== 'undefined' && !document.getElementById(MOTION_STYLE_ID)) {
+      var motionEl = document.createElement('style');
+      motionEl.id = MOTION_STYLE_ID;
+      motionEl.textContent = MOTION_CSS;
+      document.head.appendChild(motionEl);
+    }
+
     function rpc(method, params) {
       return ctx.api.invoke('omp:plugin-host:invoke', {
         pluginId: PLUGIN_ID,
@@ -216,7 +252,8 @@ window.__OMP_PLUGIN__({
 
     /* KPI 卡：微标签 + 大数字 + 迷你走势（mono stat KPI card）。 */
     function KpiCard(props) {
-      return h('div', { style: S.card }, [
+      var style = props.style ? Object.assign({}, S.card, props.style) : S.card;
+      return h('div', { className: props.className, style: style }, [
         h('div', { style: S.cardHead }, [
           h('span', { style: S.cardLabel }, props.label),
           h('span', { style: { flex: 1 } }),
@@ -259,10 +296,14 @@ window.__OMP_PLUGIN__({
           h('stop', { key: 'a', offset: '0%', stopColor: 'var(--accent)', stopOpacity: 0.32 }),
           h('stop', { key: 'b', offset: '100%', stopColor: 'var(--accent)', stopOpacity: 0 }),
         ])),
-        area ? h('path', { key: 'a', d: area, fill: 'url(#' + gid + ')' }) : null,
+        area ? h('path', {
+          key: 'a', d: area, fill: 'url(#' + gid + ')', className: 'lu-area',
+        }) : null,
         line ? h('path', {
           key: 'l', d: line, fill: 'none', stroke: 'var(--accent)',
           strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round',
+          pathLength: 1, className: 'lu-line',
+          style: { '--lu-len': 1 },
           vectorEffect: 'non-scaling-stroke', opacity: 0.95,
         }) : null,
       ]);
@@ -333,7 +374,9 @@ window.__OMP_PLUGIN__({
           /* 零成本日：基线上一枚 3px 圆点，保留节奏感（mono 风格的静默拍）。 */
           return h('rect', {
             key: d.day, x: x, y: BAR_PAD.t + plotH - 3, width: bw, height: 3,
-            rx: 1.5, fill: 'var(--accent)', opacity: hov === -1 ? 0.16 : 0.08,
+            rx: 1.5, fill: 'var(--accent)',
+            className: 'lu-dot', style: { animationDelay: (i * 10) + 'ms' },
+            opacity: hov === -1 ? 0.16 : 0.08,
           });
         }
         var dimmed = hov !== -1 && hov !== i;
@@ -341,6 +384,12 @@ window.__OMP_PLUGIN__({
           key: d.day, x: x, y: y, width: bw,
           height: Math.max(BAR_PAD.t + plotH - y, bw),
           rx: bw / 2, fill: 'var(--accent)',
+          className: 'lu-bar',
+          style: {
+            animationDelay: (i * 10) + 'ms',
+            /* 捕获区盖在柱上，:hover 落不到柱身 —— 伸长由 hover 状态驱动 */
+            transform: hov === i ? 'scaleY(1.045)' : 'none',
+          },
           opacity: dimmed ? 0.35 : hov === i ? 1 : 0.78,
         });
       });
@@ -440,12 +489,18 @@ window.__OMP_PLUGIN__({
           var t = v / (max || 1);
           var op = 0;
           if (v > 0) op = t <= 0.25 ? 0.32 : t <= 0.5 ? 0.55 : t <= 0.75 ? 0.78 : 1;
+          var hovK = hov && hov.k === k;
           cells.push(
             h('rect', {
               key: k,
               x: wk * pitch, y: row * pitch, width: cell, height: cell, rx: Math.max(cell * 0.28, 2),
               fill: v > 0 ? 'var(--accent)' : 'var(--border)',
               opacity: v > 0 ? op : 0.55,
+              className: 'lu-cell',
+              style: {
+                animationDelay: ((wk * 7 + row) * 5) + 'ms',
+                transform: hovK ? 'scale(1.22)' : 'none',
+              },
             }),
           );
         }
@@ -545,6 +600,7 @@ window.__OMP_PLUGIN__({
       };
       var hue = pct >= 0.9 ? 'var(--danger)' : pct >= 0.75 ? 'var(--warn)' : 'var(--accent)';
       var vEnd = A0 + SWEEP * Math.max(pct, 0.004);
+      var vLen = Math.max(pct, 0.004) * 100; // pathLength=100 归一后的弧长
       var pctText = Math.round(pct * 100) + '%';
       return h('div', {
         style: {
@@ -567,6 +623,9 @@ window.__OMP_PLUGIN__({
             h('path', {
               d: arc(A0, vEnd), fill: 'none',
               stroke: hue, strokeWidth: sw, strokeLinecap: 'round',
+              pathLength: 100, className: 'lu-arc',
+              style: { '--lu-len': vLen, animationDelay: '150ms' },
+              strokeDasharray: vLen + ' 1000',
             }),
           ]),
           h('div', {
@@ -623,12 +682,16 @@ window.__OMP_PLUGIN__({
         var x0 = cx + r * Math.cos(rad0), y0 = cy + r * Math.sin(rad0);
         var x1 = cx + r * Math.cos(rad1), y1 = cy + r * Math.sin(rad1);
         var large = a1 - a0 > 180 ? 1 : 0;
+        var segLen = Math.max(((a1 - a0) / 360) * 100, 0.5);
         return h('path', {
           key: p.provider + i,
           d: 'M' + x0.toFixed(2) + ',' + y0.toFixed(2) +
             ' A' + r + ',' + r + ' 0 ' + large + ' 1 ' + x1.toFixed(2) + ',' + y1.toFixed(2),
           fill: 'none', stroke: 'var(--accent)', opacity: tone(i, segs.length),
           strokeWidth: sw, strokeLinecap: 'round',
+          pathLength: 100, className: 'lu-arc',
+          style: { '--lu-len': segLen, animationDelay: (150 + i * 120) + 'ms' },
+          strokeDasharray: segLen + ' 1000',
         });
       });
 
@@ -801,8 +864,13 @@ window.__OMP_PLUGIN__({
       var er = R.useState(null), err = er[0], setErr = er[1];
       var bs = R.useState(false), busy = bs[0], setBusy = bs[1];
       var dy = R.useState(90), days = dy[0], setDays = dy[1];
+      var rootRef = R.useRef(null);
+      var lastLoadAt = R.useRef(0);
+      var daysRef = R.useRef(days);
+      daysRef.current = days;
 
       var load = R.useCallback(function (d) {
+        lastLoadAt.current = Date.now();
         setBusy(true);
         Promise.all([
           rpc('usage.summary', { days: d }),
@@ -825,8 +893,24 @@ window.__OMP_PLUGIN__({
 
       R.useEffect(function () { load(90); }, [load]); // 首载固定 90 天；切窗口走 onPick
 
+      /* 面板重新可见（隐藏的 tab 是 display:none，IO 能感知）→ 数据超过
+         60s 就自动重同步。这样就不需要手动刷新按钮了。 */
+      var paneReady = !!sum || !!err;
+      R.useEffect(function () {
+        var el = rootRef.current;
+        if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+        var io = new IntersectionObserver(function (entries) {
+          var vis = entries[entries.length - 1].isIntersecting;
+          if (!vis) return;
+          if (Date.now() - lastLoadAt.current < 60_000) return;
+          load(daysRef.current);
+        }, { threshold: 0.05 });
+        io.observe(el);
+        return function () { io.disconnect(); };
+      }, [load, paneReady]); // 就绪后根节点换人，重挂观察
+
       if (!sum && !err) {
-        return h('div', { 'data-plugin-pane': c.id, style: { padding: '16px 4px' } }, [
+        return h('div', { 'data-plugin-pane': c.id, ref: rootRef, style: { padding: '16px 4px' } }, [
           h(ctx.beui.Loader, { variant: 'spinner', size: 14, label: '读取内核用量账本' }),
         ]);
       }
@@ -839,10 +923,12 @@ window.__OMP_PLUGIN__({
       daily.forEach(function (d) {
         rangeCost += d.cost;
         rangeCount += d.count;
-        if (d.cost > 0) activeDays++;
+        /* 活跃 = 有调用的天（有 token 流水即算，成本可为 0 的无价调用也算） */
+        if (d.count > 0) activeDays++;
         if (d.cost > peak.cost) peak = { cost: d.cost, day: d.day };
       });
-      var span = daily.length;
+      /* 分母用选中的窗口天数（GROUP BY 只返回有记录的日子，daily.length 会少算） */
+      var span = days;
       var avgCost = activeDays > 0 ? rangeCost / activeDays : 0;
       var total = sum ? sum.total : { cost: 0, count: 0 };
 
@@ -867,10 +953,6 @@ window.__OMP_PLUGIN__({
             ' · API 等价口径'),
         ]),
         h(Segmented, { key: 'seg', days: days, busy: busy, onPick: onPick }),
-        h(ctx.beui.Button, {
-          key: 'rf', size: 'sm', variant: 'ghost', disabled: busy,
-          onClick: function () { load(days); },
-        }, '刷新'),
       ]);
 
       var errBar = err
@@ -889,9 +971,9 @@ window.__OMP_PLUGIN__({
 
       var hasData = rangeCost > 0;
 
-      /* KPI 行：区间成本 / 区间调用 / 活跃天数 / 单日峰值 */
+      /* KPI 行：区间成本 / 区间调用 / 活跃天数 / 单日峰值（key 带窗口 → 切范围重放 rise） */
       var kpis = h('div', {
-        key: 'kpis',
+        key: 'kpis-' + days,
         style: {
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
@@ -899,16 +981,16 @@ window.__OMP_PLUGIN__({
           paddingBottom: '10px',
         },
       }, [
-        h(KpiCard, { key: 'cost', label: '区间成本', chip: '等价USD' },
-          h(Spark, { series: daily.map(function (d) { return d.cost; }), uid: 'c', label: '逐日成本走势' })),
-        h(KpiCard, { key: 'calls', label: '区间调用', chip: 'CALLS' },
-          h(Spark, { series: daily.map(function (d) { return d.count; }), uid: 'n', label: '逐日调用走势' })),
-        h(KpiCard, { key: 'act', label: '活跃天数', chip: span + 'D' },
+        h(KpiCard, { key: 'cost', label: '区间成本', chip: '等价USD', className: 'lu-rise' },
+          h(Spark, { series: daily.map(function (d) { return d.cost; }), uid: 'c' + days, label: '逐日成本走势' })),
+        h(KpiCard, { key: 'calls', label: '区间调用', chip: 'CALLS', className: 'lu-rise', style: { animationDelay: '50ms' } },
+          h(Spark, { series: daily.map(function (d) { return d.count; }), uid: 'n' + days, label: '逐日调用走势' })),
+        h(KpiCard, { key: 'act', label: '活跃天数', chip: span + 'D', className: 'lu-rise', style: { animationDelay: '100ms' } },
           h(SharePill, {
             frac: span > 0 ? activeDays / span : 0,
-            note: activeDays + ' / ' + (span || 0) + ' 天有消耗',
+            note: activeDays + ' / ' + (span || 0) + ' 天有调用',
           })),
-        h(KpiCard, { key: 'peak', label: '单日峰值', chip: 'PEAK' },
+        h(KpiCard, { key: 'peak', label: '单日峰值', chip: 'PEAK', className: 'lu-rise', style: { animationDelay: '150ms' } },
           h('div', { style: { paddingTop: '9px' } }, [
             h('div', {
               style: {
@@ -930,11 +1012,11 @@ window.__OMP_PLUGIN__({
             fontSize: '10px', color: 'var(--fg-subtle)',
           },
         }, '日均 ' + fmtUsd(avgCost)),
-        footL: span + ' 天窗口 · ' + activeDays + ' 天有消耗',
+        footL: span + ' 天窗口 · ' + activeDays + ' 天有调用',
         footR: '峰值 ' + fmtUsd(peak.cost),
       },
         hasData
-          ? h(PillBars, { daily: daily })
+          ? h(PillBars, { key: 'bars-' + days, daily: daily })
           : h('div', {
               style: {
                 padding: '22px 8px', textAlign: 'center',

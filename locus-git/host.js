@@ -55,32 +55,43 @@ function regQueryGitPath() {
  * utilityProcess）继承的 PATH 常常没有 git —— spawn git ENOENT 的根因。
  * 顺序：先常见安装位置与注册表，最后才回落裸 'git'（PATH）。
  */
+let resolveDiag = '';
 function resolveGitExe() {
   if (gitExe) return gitExe;
+  const diag = [];
+  const tryPath = (c) => {
+    let ok = false;
+    try {
+      ok = fs.existsSync(c) && fs.statSync(c).isFile();
+    } catch {
+      ok = false;
+    }
+    diag.push((ok ? 'HIT ' : 'miss') + ' ' + c);
+    return ok;
+  };
   const candidates = [];
   const pf = process.env.ProgramFiles;
   const pf86 = process.env['ProgramFiles(x86)'];
   const lac = process.env.LOCALAPPDATA;
+  diag.push('ProgramFiles=' + (pf || '(unset)') + ' LOCALAPPDATA=' + (lac || '(unset)'));
   if (pf) candidates.push(path.join(pf, 'Git', 'cmd', 'git.exe'));
   if (pf) candidates.push(path.join(pf, 'Git', 'bin', 'git.exe'));
   if (pf86) candidates.push(path.join(pf86, 'Git', 'cmd', 'git.exe'));
   if (lac) candidates.push(path.join(lac, 'Programs', 'Git', 'cmd', 'git.exe'));
-  // 便携/自定义盘安装（如 D:\Git）：逐盘符扫 <drive>:\Git\cmd\git.exe
+  // 便携/自定义盘安装（如 D:\\Git）：逐盘符扫 <drive>:\\Git\\cmd\\git.exe
   for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
-    candidates.push(letter + ':\\Git\\cmd\\git.exe');
+    candidates.push(letter + ':\\\\Git\\\\cmd\\\\git.exe');
   }
   const reg = regQueryGitPath();
+  diag.push('registry=' + (reg || '(miss)'));
   if (reg) candidates.push(path.join(reg, 'cmd', 'git.exe'));
   for (const c of candidates) {
-    try {
-      if (fs.existsSync(c) && fs.statSync(c).isFile()) {
-        gitExe = c;
-        return c;
-      }
-    } catch {
-      /* 下一个候选 */
+    if (tryPath(c)) {
+      gitExe = c;
+      return c;
     }
   }
+  resolveDiag = diag.join(' | ');
   gitExe = 'git'; // 回落：交给 PATH（Linux/macOS 或 PATH 完好的场景）
   return gitExe;
 }
@@ -106,7 +117,12 @@ function git(args, opts = {}) {
       (err, stdout, stderr) => {
         if (err) {
           if (err.code === 'ENOENT') {
-            reject(new Error('未找到 git 可执行文件（PATH 与常见安装位置均无）—— 请安装 Git for Windows'));
+            reject(
+              new Error(
+                '未找到 git 可执行文件。环境诊断：' + (resolveDiag || '(解析未运行)') +
+                ' —— 请安装 Git for Windows，或把其 cmd 目录加入系统 PATH',
+              ),
+            );
             return;
           }
           const reason = String(stderr || err.message || '').trim().split('\n').slice(-4).join('\n');
