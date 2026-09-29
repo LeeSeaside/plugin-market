@@ -1,45 +1,129 @@
 /*!
  * 用量统计 · Host 半（com.locus.usage）
  *
- * runner 契约同 com.locus.git（全权 Node，每插件一进程）。数据源 = 内核
- * agent.db（<kernelHome>/agent/agent.db），只跑 SELECT —— 与内核进程共存的
- * 只读消费（schema 实测：recorded_at 均为毫秒时间戳；client_usage 在 desk
- * RPC 模式下暂无写入，tokens 段会以 null 显形）。
+ * 数据源（2026-09-29 方案A拍板）：内核 stats.db 的 messages 表 —— omp 18.x
+ * "sessions sync" 管线的全量用量账本（token 四分类 / TTFT / 时长 / API 等价
+ * 成本），subscription / token-plan 模型的用量也在内。quota 仍读
+ * agent.db usage_history（stats.db 无限额快照）。
+ *
+ * 面板加载时 spawn `omp stats --json` 触发一次增量同步：omp 18.3.0 起内置
+ * stats 子命令，语义即「先同步 session 文件后出数」，实测毫秒级（增量游标
+ * file_offsets 幂等）。bundled exe 优先，全局 PATH omp 兜底；60s 节流 +
+ * 并发单飞；同步失败静默降级为直读库（上次同步的快照）。
  *
  * 注入参数（omp:plugin-host:invoke handler，服务端事实源）：
  *   params.kernelHome  内核家目录绝对路径（createServices 解析结果）
+ *   params.ompExe      bundled 内核 exe（懒解析，未 staged 为 null）
  *
  * 方法面：
- *   usage.summary { days? }  → { total, daily[], providers[], tokens|null }
- *   usage.models             → [{ model_key, samples, tps, ttft_s, updated_at }]
- *   usage.quota              → [{ limit_id, label, used_fraction, status, resets_at }]
+ *   usage.summary { days? }  → { total, daily[], providers[], tokens[] }
+ *   usage.models             → [{ modelKey, samples, tps, ttftS, updatedAt }]
+ *   usage.quota              → [{ limitId, label, usedFraction, status, resetsAt }]
  */
-import { DatabaseSync } from 'node:sqlite';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 const DEFAULT_DAYS = 90;
 const MAX_DAYS = 400;
+const SYNC_THROTTLE_MS = 60_000;
+const SYNC_TIMEOUT_MS = 30_000;
 
-let db = null;
-let dbPath = null;
+let statsDb = null;
+let statsDbPath = null;
+let agentDb = null;
+let agentDbPath = null;
+let syncPromise = null;
+let lastSyncAt = 0;
 
-function openDb(kernelHome) {
+function resolveStatsDbPath(kernelHome) {
+  const candidates = [
+    kernelHome ? path.join(kernelHome, 'stats.db') : null,
+    path.join(os.homedir(), '.omp', 'stats.db'),
+  ].filter(Boolean);
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) return p;
+    } catch {
+      /* 探测失败继续 */
+    }
+  }
+  return candidates[0];
+}
+
+function openStatsDb(kernelHome) {
+  const p = resolveStatsDbPath(kernelHome);
+  if (!p) throw new Error('stats.db 不存在 —— 内核从未同步过 session 统计');
+  if (statsDb && statsDbPath === p) return statsDb;
+  if (statsDb) {
+    try {
+      statsDb.close();
+    } catch {
+      /* 已关 */
+    }
+    statsDb = null;
+  }
+  statsDb = new DatabaseSync(p, { readOnly: true });
+  statsDbPath = p;
+  return statsDb;
+}
+
+function openAgentDb(kernelHome) {
   if (!kernelHome || typeof kernelHome !== 'string') {
     throw new Error('kernelHome 未注入（服务端参数缺失）');
   }
   const p = path.join(kernelHome, 'agent', 'agent.db');
-  if (db && dbPath === p) return db;
-  if (db) {
+  if (agentDb && agentDbPath === p) return agentDb;
+  if (agentDb) {
     try {
-      db.close();
+      agentDb.close();
     } catch {
       /* 已关 */
     }
-    db = null;
+    agentDb = null;
   }
-  db = new DatabaseSync(p);
-  dbPath = p;
-  return db;
+  agentDb = new DatabaseSync(p, { readOnly: true });
+  agentDbPath = p;
+  return agentDb;
+}
+
+/**
+ * 面板加载触发的增量同步：`omp stats --json` 先同步后出数。并发单飞 +
+ * 60s 节流；全部候选失败时返回 'unavailable'（直读库快照，不报错）。
+ */
+function syncSessions(ompExe, kernelHome) {
+  if (Date.now() - lastSyncAt < SYNC_THROTTLE_MS) return Promise.resolve('throttled');
+  if (syncPromise) return syncPromise;
+  const candidates = [...new Set([ompExe, 'omp'])].filter(Boolean);
+  syncPromise = (async () => {
+    for (const exe of candidates) {
+      const ok = await new Promise((resolve) => {
+        try {
+          const child = spawn(exe, ['stats', '--json'], {
+            timeout: SYNC_TIMEOUT_MS,
+            windowsHide: true,
+            stdio: ['ignore', 'ignore', 'ignore'],
+            // 与 chat-service spawn 内核同款：隔离模式下 session 落在同一 home。
+            env: { ...process.env, PI_CODING_AGENT_DIR: path.join(kernelHome, 'agent') },
+          });
+          child.on('close', (code) => resolve(code === 0));
+          child.on('error', () => resolve(false));
+        } catch {
+          resolve(false);
+        }
+      });
+      if (ok) {
+        lastSyncAt = Date.now();
+        return 'synced';
+      }
+    }
+    return 'unavailable';
+  })();
+  return syncPromise.finally(() => {
+    syncPromise = null;
+  });
 }
 
 const msToLocalDay = (ms) => {
@@ -51,40 +135,30 @@ const msToLocalDay = (ms) => {
 function summaryRequest(params) {
   const days = Math.min(Math.max(Number(params.days) || DEFAULT_DAYS, 1), MAX_DAYS);
   const sinceMs = Date.now() - days * 86_400_000;
-  const d = openDb(params.kernelHome);
-  // 只读消费：全部 SELECT；任何 schema 漂移都以可读错误显形。
-  const daily = d
+  const db = openStatsDb(params.kernelHome);
+  const daily = db
     .prepare(
-      `SELECT date(recorded_at/1000, 'unixepoch', 'localtime') AS day,
-              COUNT(*) AS n, SUM(cost_usd) AS cost
-         FROM usage_cost_history WHERE recorded_at >= ?
-        GROUP BY day ORDER BY day`,
-    )
-    .all(sinceMs);
-  const totalRow = d
-    .prepare(
-      `SELECT COUNT(*) AS n, SUM(cost_usd) AS cost,
-              MIN(recorded_at) AS first_at, MAX(recorded_at) AS last_at
-         FROM usage_cost_history`,
-    )
-    .get();
-  const providers = d
-    .prepare(
-      `SELECT provider, COUNT(*) AS n, SUM(cost_usd) AS cost
-         FROM usage_cost_history GROUP BY provider ORDER BY cost DESC`,
-    )
-    .all();
-  // client_usage 在 desk RPC 模式下当前无写入（实测 0 行）：0 行时 tokens=null，
-  // UI 显形为「暂无数据」而不是画一张空图。
-  const tokenRows = d
-    .prepare(
-      `SELECT date(recorded_at/1000, 'unixepoch', 'localtime') AS day,
+      `SELECT date(timestamp/1000, 'unixepoch', 'localtime') AS day,
+              COUNT(*) AS n, SUM(cost_total) AS cost,
               SUM(input_tokens) AS input, SUM(output_tokens) AS output,
               SUM(cache_read_tokens) AS cacheRead, SUM(cache_write_tokens) AS cacheWrite
-         FROM client_usage WHERE recorded_at >= ?
+         FROM messages WHERE timestamp >= ?
         GROUP BY day ORDER BY day`,
     )
     .all(sinceMs);
+  const totalRow = db
+    .prepare(
+      `SELECT COUNT(*) AS n, SUM(cost_total) AS cost,
+              MIN(timestamp) AS first_at, MAX(timestamp) AS last_at
+         FROM messages`,
+    )
+    .get();
+  const providers = db
+    .prepare(
+      `SELECT provider, COUNT(*) AS n, SUM(cost_total) AS cost
+         FROM messages GROUP BY provider ORDER BY cost DESC`,
+    )
+    .all();
   return {
     total: {
       count: Number(totalRow?.n ?? 0),
@@ -92,40 +166,50 @@ function summaryRequest(params) {
       firstDay: totalRow?.first_at ? msToLocalDay(totalRow.first_at) : null,
       lastDay: totalRow?.last_at ? msToLocalDay(totalRow.last_at) : null,
     },
-    daily: daily.map((r) => ({ day: r.day, count: Number(r.n), cost: Number(r.cost ?? 0) })),
+    daily: daily.map((r) => ({
+      day: r.day,
+      count: Number(r.n),
+      cost: Number(r.cost ?? 0),
+      input: Number(r.input ?? 0),
+      output: Number(r.output ?? 0),
+      cacheRead: Number(r.cacheRead ?? 0),
+      cacheWrite: Number(r.cacheWrite ?? 0),
+    })),
     providers: providers.map((r) => ({ provider: r.provider, count: Number(r.n), cost: Number(r.cost ?? 0) })),
-    tokens:
-      tokenRows.length > 0
-        ? tokenRows.map((r) => ({
-            day: r.day,
-            input: Number(r.input ?? 0),
-            output: Number(r.output ?? 0),
-            cacheRead: Number(r.cacheRead ?? 0),
-            cacheWrite: Number(r.cacheWrite ?? 0),
-          }))
-        : null,
+    // token 流水现与 daily 同源同窗（stats.db 全量记账），不再有「待上报」态。
+    tokens: daily.map((r) => ({
+      day: r.day,
+      input: Number(r.input ?? 0),
+      output: Number(r.output ?? 0),
+      cacheRead: Number(r.cacheRead ?? 0),
+      cacheWrite: Number(r.cacheWrite ?? 0),
+    })),
   };
 }
 
 function modelsRequest(params) {
-  const d = openDb(params.kernelHome);
-  const rows = d
+  const db = openStatsDb(params.kernelHome);
+  // duration / ttft 单位毫秒（与 /stats 面板 avgTtft 同源）；tps 与 TTFT 均
+  // 按聚合比值（累计和相除即均值），样本数 = 该模型 assistant 消息数。
+  const rows = db
     .prepare(
-      `SELECT model_key, samples, output_tokens, gen_ms, ttft_samples, ttft_ms, updated_at
-         FROM model_perf ORDER BY samples DESC LIMIT 30`,
+      `SELECT model, COUNT(*) AS n, SUM(output_tokens) AS output,
+              SUM(duration) AS genMs, AVG(ttft) AS ttftMs, MAX(timestamp) AS updated
+         FROM messages WHERE model IS NOT NULL
+        GROUP BY model ORDER BY n DESC LIMIT 30`,
     )
     .all();
   return rows.map((r) => ({
-    modelKey: r.model_key,
-    samples: Number(r.samples ?? 0),
-    tps: Number(r.gen_ms) > 0 ? Number(r.output_tokens ?? 0) / Number(r.gen_ms) * 1000 : null,
-    ttftS: Number(r.ttft_samples) > 0 ? Number(r.ttft_ms ?? 0) / 1000 : null,
-    updatedAt: Number(r.updated_at ?? 0),
+    modelKey: r.model,
+    samples: Number(r.n ?? 0),
+    tps: Number(r.genMs) > 0 ? (Number(r.output ?? 0) / Number(r.genMs)) * 1000 : null,
+    ttftS: Number(r.ttftMs) > 0 ? Number(r.ttftMs) / 1000 : null,
+    updatedAt: Number(r.updated ?? 0),
   }));
 }
 
 function quotaRequest(params) {
-  const d = openDb(params.kernelHome);
+  const d = openAgentDb(params.kernelHome);
   const rows = d
     .prepare(
       `SELECT u.limit_id, u.label, u.used_fraction, u.status, u.resets_at
@@ -144,9 +228,14 @@ function quotaRequest(params) {
 }
 
 export async function activate(host) {
-  host.log('info', '用量统计 host 半已激活');
+  host.log('info', '用量统计 host 半已激活（数据源 = 内核 stats.db）');
   return {
     async request(method, params = {}) {
+      // summary / models 先触发一次面板级增量同步（节流内直接跳过），
+      // 再读库 —— 同步失败不阻断（降级为上次快照）。
+      if (method === 'usage.summary' || method === 'usage.models') {
+        await syncSessions(params.ompExe, params.kernelHome).catch(() => 'unavailable');
+      }
       switch (method) {
         case 'usage.summary':
           return summaryRequest(params);

@@ -20,12 +20,63 @@
  *   git.push    {}                        → { ok: true, output }
  *   git.pull    {}                        → { ok: true, output }
  */
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const LOCAL_TIMEOUT_MS = 15_000;
 const NET_TIMEOUT_MS = 90_000;
 const MAX_BUFFER = 512 * 1024;
 const DEFAULT_LOG_N = 30;
+
+/** git.exe 解析缓存（解析一次，进程内复用）。 */
+let gitExe = null;
+
+/** 从注册表读 Git for Windows 安装目录（terminal 插件同款手法）。 */
+function regQueryGitPath() {
+  try {
+    const out = execFileSync(
+      'reg.exe',
+      ['query', 'HKLM\SOFTWARE\GitForWindows', '/v', 'InstallPath'],
+      { encoding: 'utf8', timeout: 5000, windowsHide: true },
+    );
+    const m = /InstallPath\s+REG_SZ\s+(.+)/.exec(out);
+    return m ? m[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 解析 git 可执行文件。桌面 GUI 进程链（Explorer → cmd → Electron →
+ * utilityProcess）继承的 PATH 常常没有 git —— spawn git ENOENT 的根因。
+ * 顺序：先常见安装位置与注册表，最后才回落裸 'git'（PATH）。
+ */
+function resolveGitExe() {
+  if (gitExe) return gitExe;
+  const candidates = [];
+  const pf = process.env.ProgramFiles;
+  const pf86 = process.env['ProgramFiles(x86)'];
+  const lac = process.env.LOCALAPPDATA;
+  if (pf) candidates.push(path.join(pf, 'Git', 'cmd', 'git.exe'));
+  if (pf) candidates.push(path.join(pf, 'Git', 'bin', 'git.exe'));
+  if (pf86) candidates.push(path.join(pf86, 'Git', 'cmd', 'git.exe'));
+  if (lac) candidates.push(path.join(lac, 'Programs', 'Git', 'cmd', 'git.exe'));
+  const reg = regQueryGitPath();
+  if (reg) candidates.push(path.join(reg, 'cmd', 'git.exe'));
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c) && fs.statSync(c).isFile()) {
+        gitExe = c;
+        return c;
+      }
+    } catch {
+      /* 下一个候选 */
+    }
+  }
+  gitExe = 'git'; // 回落：交给 PATH（Linux/macOS 或 PATH 完好的场景）
+  return gitExe;
+}
 
 /** 执行 git（argv 数组传参，无 shell，无注入面）。stderr 摘要进 Error.message。 */
 function git(args, opts = {}) {
@@ -36,7 +87,7 @@ function git(args, opts = {}) {
   const fullArgs = ['-c', 'core.quotepath=false', ...args];
   return new Promise((resolve, reject) => {
     execFile(
-      'git',
+      resolveGitExe(),
       fullArgs,
       {
         cwd,
@@ -52,6 +103,10 @@ function git(args, opts = {}) {
           e.gitCode = err.code;
           e.gitKilled = err.killed === true;
           reject(e);
+          return;
+        }
+        if (err.code === 'ENOENT') {
+          reject(new Error('未找到 git 可执行文件（PATH 与常见安装位置均无）—— 请安装 Git for Windows'));
           return;
         }
         resolve(String(stdout ?? ''));

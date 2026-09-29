@@ -794,6 +794,8 @@ window.__OMP_PLUGIN__({
     function UsagePane(props) {
       var c = props.ctx;
       var sm = R.useState(null), sum = sm[0], setSum = sm[1];
+      /* 热力格独立数据源：固定 90 天窗口，不随范围切换清空（13 周视图）。 */
+      var sh = R.useState(null), sum90 = sh[0], setSum90 = sh[1];
       var md = R.useState([]), models = md[0], setModels = md[1];
       var qt = R.useState([]), quota = qt[0], setQuota = qt[1];
       var er = R.useState(null), err = er[0], setErr = er[1];
@@ -804,13 +806,15 @@ window.__OMP_PLUGIN__({
         setBusy(true);
         Promise.all([
           rpc('usage.summary', { days: d }),
+          rpc('usage.summary', { days: 90 }),
           rpc('usage.models'),
           rpc('usage.quota'),
         ])
           .then(function (r) {
             setSum(r[0]);
-            setModels(Array.isArray(r[1]) ? r[1] : []);
-            setQuota(Array.isArray(r[2]) ? r[2] : []);
+            setSum90(r[1]);
+            setModels(Array.isArray(r[2]) ? r[2] : []);
+            setQuota(Array.isArray(r[3]) ? r[3] : []);
             setErr(null);
           })
           .catch(function (e) {
@@ -858,7 +862,9 @@ window.__OMP_PLUGIN__({
               fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums',
               fontSize: '10px', color: 'var(--fg-subtle)', paddingTop: '2px',
             },
-          }, '累计 ' + fmtUsd(total.cost) + ' · ' + fmtNum(total.count) + ' 笔'),
+          }, '累计 ' + fmtUsd(total.cost) + ' · ' + fmtNum(total.count) + ' 笔' +
+            (total.lastDay ? ' · 记至 ' + fmtDay(total.lastDay) : '') +
+            ' · API 等价口径'),
         ]),
         h(Segmented, { key: 'seg', days: days, busy: busy, onPick: onPick }),
         h(ctx.beui.Button, {
@@ -893,7 +899,7 @@ window.__OMP_PLUGIN__({
           paddingBottom: '10px',
         },
       }, [
-        h(KpiCard, { key: 'cost', label: '区间成本', chip: 'USD' },
+        h(KpiCard, { key: 'cost', label: '区间成本', chip: '等价USD' },
           h(Spark, { series: daily.map(function (d) { return d.cost; }), uid: 'c', label: '逐日成本走势' })),
         h(KpiCard, { key: 'calls', label: '区间调用', chip: 'CALLS' },
           h(Spark, { series: daily.map(function (d) { return d.count; }), uid: 'n', label: '逐日调用走势' })),
@@ -931,20 +937,27 @@ window.__OMP_PLUGIN__({
           ? h(PillBars, { daily: daily })
           : h('div', {
               style: {
-                padding: '26px 8px', textAlign: 'center',
+                padding: '22px 8px', textAlign: 'center',
                 fontFamily: 'var(--font-mono)', fontSize: '11px',
-                color: 'var(--fg-subtle)',
+                color: 'var(--fg-subtle)', lineHeight: 1.9,
               },
-            }, '区间内暂无成本数据'),
+            }, [
+              h('div', { key: 'a' }, '区间内无成本记录'),
+              h('div', { key: 'b', style: { fontSize: '10px', opacity: 0.85 } },
+                total.lastDay
+                  ? '成本账本最后一条为 ' + fmtDay(total.lastDay) + ' —— 订阅 / token-plan 模型不产生美元成本行'
+                  : '暂无任何成本记录'),
+            ]),
       );
 
+      var heatDaily = (sum90 && sum90.daily) || daily;
       var heatCard = h(Card, {
         key: 'heat',
         label: '活跃分布',
         chip: '热力格',
-        footL: '13 周 × 7 天',
+        footL: '近 13 周 · 固定窗口',
         footR: '悬停查看当日明细',
-      }, h(HeatGrid, { daily: daily }));
+      }, h(HeatGrid, { daily: heatDaily }));
 
       var quotaCard = quota.length > 0
         ? h(Card, {
@@ -984,24 +997,13 @@ window.__OMP_PLUGIN__({
           }, h(ModelRows, { models: models }))
         : null;
 
-      var tokenNote = sum && !sum.tokens
-        ? h('div', {
-            key: 'toknote',
-            style: {
-              padding: '10px 14px', border: '1px dashed var(--border)',
-              borderRadius: '10px', fontFamily: 'var(--font-mono)',
-              fontSize: '10.5px', color: 'var(--fg-subtle)', lineHeight: 1.7,
-            },
-          }, 'token / 缓存流水：内核 client_usage 表在桌面 RPC 模式下暂无写入，待内核上报后自动显形。')
-        : null;
-
       return h('div', {
         'data-plugin-pane': c.id,
         style: {
           padding: '10px 12px 16px',
           display: 'flex', flexDirection: 'column', gap: '10px',
         },
-      }, [head, errBar, kpis, barCard, heatCard, quotaCard, provCard, modelsCard, tokenNote]);
+      }, [head, errBar, kpis, barCard, heatCard, quotaCard, provCard, modelsCard]);
     }
 
     function segNote(providers) {
