@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-09-28T11:02:52.572Z",
+  "updatedAt": "2026-09-29T06:44:03.174Z",
   "plugins": [
     {
       "id": "com.locus.git",
@@ -121,14 +121,14 @@
     {
       "id": "com.locus.usage",
       "name": "用量统计",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "apiVersion": 1,
       "description": "随应用分发的用量面板：逐日成本折线、贡献热力图、限额窗口与模型性能（TPS/TTFT）。Host 半只读内核 agent.db（usage_cost_history / client_usage / usage_history / model_perf），只跑 SELECT。",
       "path": "locus-usage",
       "manifest": {
         "id": "com.locus.usage",
         "name": "用量统计",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "apiVersion": 1,
         "description": "随应用分发的用量面板：逐日成本折线、贡献热力图、限额窗口与模型性能（TPS/TTFT）。Host 半只读内核 agent.db（usage_cost_history / client_usage / usage_history / model_perf），只跑 SELECT。",
         "entry": {
@@ -162,8 +162,8 @@
         },
         {
           "name": "manifest.json",
-          "sha256": "d4232fd527f7c7f9a7f27e87b8b7bf8f1266245b3c8205676f0307add3a990a4",
-          "bytes": 596
+          "sha256": "96a00d2f847f6d7bdaaf894aa9557eedb54a043ceebd9eae6fe3efd9aa583d8e",
+          "bytes": 644
         }
       ]
     }
