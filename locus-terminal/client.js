@@ -95,10 +95,7 @@ window.__OMP_PLUGIN__({
     function TerminalPane() {
       var containerRef = R.useRef(null);
       var termRef = R.useRef(null);
-      var s1 = R.useState(null), shells = s1[0], setShells = s1[1];
       var s2 = R.useState(''), status = s2[0], setStatus = s2[1];
-      var s3 = R.useState(session.shellId), activeShell = s3[0], setActiveShell = s3[1];
-      var s4 = R.useState(session.utf8), utf8Mode = s4[0], setUtf8Mode = s4[1];
 
       var startSession = R.useCallback(function (shellId) {
         var term = termRef.current;
@@ -110,7 +107,6 @@ window.__OMP_PLUGIN__({
             .then(function (r) {
               session.terminalId = r.terminalId;
               session.shellId = r.profile.id;
-              setActiveShell(r.profile.id);
               setStatus('已连接 · ' + r.profile.name);
               pollTimer = setInterval(function () {
                 rpc('term.read', { terminalId: session.terminalId })
@@ -176,9 +172,7 @@ window.__OMP_PLUGIN__({
           ctx.api.settings.get('utf8_mode').catch(function () { return 'auto'; }),
         ]).then(function (r) {
           if (!alive) return;
-          setShells(r[0].shells || []);
           session.utf8 = r[2] === 'native' ? 'native' : 'auto';
-          setUtf8Mode(session.utf8);
           var want = r[1] && r[1] !== 'auto' ? r[1] : 'auto';
           var pick = null;
           if (want !== 'auto') {
@@ -191,7 +185,6 @@ window.__OMP_PLUGIN__({
               .then(function (resp) {
                 if (!alive || !termRef.current) return;
                 if (resp.replay) term.write(resp.replay);
-                setActiveShell(session.shellId);
                 setStatus('已恢复会话');
                 pollTimer = setInterval(function () {
                   rpc('term.read', { terminalId: session.terminalId })
@@ -243,19 +236,6 @@ window.__OMP_PLUGIN__({
         // 仅挂载时初始化一次。
       }, []);
 
-      function switchShell(shellId) {
-        session.terminalId = null; // 强制走 open（旧会话在 startSession 里 close）
-        startSession(shellId);
-      }
-
-      function toggleUtf8() {
-        var next = session.utf8 === 'auto' ? 'native' : 'auto';
-        session.utf8 = next;
-        setUtf8Mode(next);
-        ctx.api.settings.set('utf8_mode', next).catch(function () {});
-        setStatus('编码模式：' + (next === 'auto' ? '强制 UTF-8（对 PowerShell/CMD 注入 65001）' : '原生（不注入）—— 重开会话生效'));
-      }
-
       function killSession() {
         if (!session.terminalId) return;
         rpc('term.close', { terminalId: session.terminalId }).catch(function () {});
@@ -265,22 +245,12 @@ window.__OMP_PLUGIN__({
         setStatus('会话已结束 —— 点击任一终端按钮重新开启');
       }
 
+      // 面板只留「结束会话 + 状态」一行（shell/编码的选择归扩展设置 —— 面板
+      // 不再承担设置职责，2026-09-29）。
       var toolbar = h('div', { 'data-locus-term-toolbar': '1', style: {
-        display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center',
+        display: 'flex', gap: '6px', alignItems: 'center',
         padding: '4px 6px',
       } }, [
-        (shells || []).map(function (s) {
-          return h(ctx.beui.Button, {
-            key: s.id, size: 'sm',
-            variant: activeShell === s.id ? 'primary' : 'ghost',
-            'data-locus-term-shell': s.id,
-            onClick: function () { switchShell(s.id); },
-          }, s.name);
-        }),
-        h(ctx.beui.Button, {
-          key: 'utf8', size: 'sm', variant: 'ghost', 'data-locus-term-utf8': utf8Mode,
-          onClick: toggleUtf8,
-        }, utf8Mode === 'auto' ? 'UTF-8：开' : 'UTF-8：关'),
         h(ctx.beui.Button, {
           key: 'kill', size: 'sm', variant: 'ghost', 'data-locus-term-kill': '1',
           onClick: killSession,
@@ -405,7 +375,7 @@ window.__OMP_PLUGIN__({
       ]);
     }
 
-    ctx.ui.registerPane('locus.terminal', TerminalPane);
+    ctx.ui.registerPane('locus.terminal', TerminalPane, { fill: true });
     ctx.ui.registerSettingsCard(SettingsCard);
     ctx.logger.info('终端插件已就绪');
     return function () {

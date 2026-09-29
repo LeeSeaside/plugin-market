@@ -84,7 +84,7 @@ window.__OMP_PLUGIN__({
         { className: 'set-row', key: c.hash },
         [
           h('div', { className: 'set-row-main', style: { minWidth: 0 } }, [
-            h('div', { style: Object.assign({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-secondary)' } }, c.subject)),
+            h('div', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-secondary)' } }, c.subject),
             h('div', { style: Object.assign({}, muted, { fontSize: '11px' }) }, c.short + ' · ' + c.author + ' · ' + c.date),
           ]),
         ],
