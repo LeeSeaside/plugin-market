@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-09-29T06:44:03.174Z",
+  "updatedAt": "2026-09-29T07:25:55.766Z",
   "plugins": [
     {
       "id": "com.locus.git",
@@ -54,14 +54,14 @@
     {
       "id": "com.locus.terminal",
       "name": "终端",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "apiVersion": 1,
       "description": "交互式终端面板：自动识别系统可用 shell（PowerShell / pwsh / CMD / Git Bash / WSL 发行版），支持选择默认终端与编码模式（强制 UTF-8 / 原生），宿主 PTY 会话跨面板切换存活。Host 半经宿主 PTY（@lydell/node-pty）spawn 真实终端进程。",
       "path": "locus-terminal",
       "manifest": {
         "id": "com.locus.terminal",
         "name": "终端",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "apiVersion": 1,
         "description": "交互式终端面板：自动识别系统可用 shell（PowerShell / pwsh / CMD / Git Bash / WSL 发行版），支持选择默认终端与编码模式（强制 UTF-8 / 原生），宿主 PTY 会话跨面板切换存活。Host 半经宿主 PTY（@lydell/node-pty）spawn 真实终端进程。",
         "entry": {
@@ -103,8 +103,8 @@
       "files": [
         {
           "name": "client.js",
-          "sha256": "07cf7a5b15de422e7253bce9b05c4395adc8990aec257e392c089127317c492b",
-          "bytes": 16036
+          "sha256": "39dc060971ccdb9be17fc9467d98254539b08f2cb864a31aeea9c18c4dc64f07",
+          "bytes": 17157
         },
         {
           "name": "host.js",
@@ -113,8 +113,8 @@
         },
         {
           "name": "manifest.json",
-          "sha256": "1891280aa3dfa914963e62706b8d74feb34aeaeb9eb602fa9f928c5ea9e47911",
-          "bytes": 1106
+          "sha256": "a5bcb55da0c550ab6b6ce164fe0bed9b032efa010d19edd8b98dedb60077fc7a",
+          "bytes": 1222
         }
       ]
     },

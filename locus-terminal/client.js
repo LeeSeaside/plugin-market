@@ -309,12 +309,24 @@ window.__OMP_PLUGIN__({
       var s2 = R.useState('auto'), defShell = s2[0], setDefShell = s2[1];
       var s3 = R.useState('auto'), utf8 = s3[0], setUtf8 = s3[1];
       var s4 = R.useState(''), saved = s4[0], setSaved = s4[1];
+      // 探测失败必须显形（此前静默吞掉，卡片只剩「自动选择」像坏了）：
+      // shellsErr = 可读原因，tick 用于「重试」重新触发 useEffect。
+      var s5 = R.useState(''), shellsErr = s5[0], setShellsErr = s5[1];
+      var s6 = R.useState(0), tick = s6[0], setTick = s6[1];
 
       R.useEffect(function () {
         var alive = true;
+        setShellsErr('');
         rpc('shells.list', {})
-          .then(function (r) { if (alive) setShells(r.shells || []); })
-          .catch(function () {});
+          .then(function (r) {
+            if (alive) setShells(r.shells || []);
+          })
+          .catch(function (e) {
+            if (alive) {
+              setShells([]);
+              setShellsErr(e && e.message ? e.message : String(e));
+            }
+          });
         ctx.api.settings.get('default_shell').then(function (v) {
           if (alive && typeof v === 'string') setDefShell(v);
         }).catch(function () {});
@@ -322,7 +334,7 @@ window.__OMP_PLUGIN__({
           if (alive && typeof v === 'string') setUtf8(v);
         }).catch(function () {});
         return function () { alive = false; };
-      }, []);
+      }, [tick]);
 
       function save(shell, mode) {
         Promise.all([
@@ -343,6 +355,19 @@ window.__OMP_PLUGIN__({
             h('div', { className: 'set-row-main', key: 'm' }, [
               h('div', { className: 'set-row-label', key: 'l' }, '默认终端'),
               h('div', { className: 'set-row-desc', key: 'd' }, '自动选择 = 按探测顺序取首个可用（pwsh 优先）'),
+              shellsErr
+                ? h('div', {
+                    key: 'err', className: 'set-row-desc', 'data-locus-shells-error': '1',
+                    style: { color: 'var(--warn)' },
+                  }, '探测失败：' + shellsErr)
+                : null,
+              shellsErr
+                ? h(ctx.beui.Button, {
+                    key: 'retry', size: 'sm', variant: 'ghost',
+                    'data-locus-shells-retry': '1',
+                    onClick: function () { setTick(function (n) { return n + 1; }); },
+                  }, '重试探测')
+                : null,
             ]),
             h('div', { key: 'v', style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } },
               shellOptions.map(function (s) {
