@@ -34,10 +34,13 @@ let gitExe = null;
 
 /** 从注册表读 Git for Windows 安装目录（terminal 插件同款手法）。 */
 function regQueryGitPath() {
+  // reg.exe 用绝对路径调 —— 本插件的宿主进程链 PATH 常常不完整（这正是
+  // spawn git ENOENT 的根因），不能指望 'reg.exe' 可解析。
+  const regExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe');
   try {
     const out = execFileSync(
-      'reg.exe',
-      ['query', 'HKLM\SOFTWARE\GitForWindows', '/v', 'InstallPath'],
+      regExe,
+      ['query', 'HKLM\\SOFTWARE\\GitForWindows', '/v', 'InstallPath'],
       { encoding: 'utf8', timeout: 5000, windowsHide: true },
     );
     const m = /InstallPath\s+REG_SZ\s+(.+)/.exec(out);
@@ -62,6 +65,10 @@ function resolveGitExe() {
   if (pf) candidates.push(path.join(pf, 'Git', 'bin', 'git.exe'));
   if (pf86) candidates.push(path.join(pf86, 'Git', 'cmd', 'git.exe'));
   if (lac) candidates.push(path.join(lac, 'Programs', 'Git', 'cmd', 'git.exe'));
+  // 便携/自定义盘安装（如 D:\Git）：逐盘符扫 <drive>:\Git\cmd\git.exe
+  for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
+    candidates.push(letter + ':\\Git\\cmd\\git.exe');
+  }
   const reg = regQueryGitPath();
   if (reg) candidates.push(path.join(reg, 'cmd', 'git.exe'));
   for (const c of candidates) {
@@ -98,15 +105,15 @@ function git(args, opts = {}) {
       },
       (err, stdout, stderr) => {
         if (err) {
+          if (err.code === 'ENOENT') {
+            reject(new Error('未找到 git 可执行文件（PATH 与常见安装位置均无）—— 请安装 Git for Windows'));
+            return;
+          }
           const reason = String(stderr || err.message || '').trim().split('\n').slice(-4).join('\n');
           const e = new Error(reason || `git ${args[0]} 失败`);
           e.gitCode = err.code;
           e.gitKilled = err.killed === true;
           reject(e);
-          return;
-        }
-        if (err.code === 'ENOENT') {
-          reject(new Error('未找到 git 可执行文件（PATH 与常见安装位置均无）—— 请安装 Git for Windows'));
           return;
         }
         resolve(String(stdout ?? ''));

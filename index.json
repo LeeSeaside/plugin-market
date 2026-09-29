@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-09-29T10:49:48.300Z",
+  "updatedAt": "2026-09-29T11:10:10.993Z",
   "plugins": [
     {
       "id": "com.locus.git",
@@ -41,8 +41,8 @@
         },
         {
           "name": "host.js",
-          "sha256": "48cd192e16ce141ab7f3fcff9524656f328b4865b84f0f8eae1b568c5c460c99",
-          "bytes": 9495
+          "sha256": "e4e1c22fd37dceb19cd0a7a3a8ffc2a4a72a330977cce8b8250db2f88e898f07",
+          "bytes": 9965
         },
         {
           "name": "manifest.json",
