@@ -16,9 +16,24 @@ window.__OMP_PLUGIN__({
     var XTerm = ctx.xterm.Terminal;
     var FitAddon = ctx.xterm.FitAddon;
 
-    // ---- 会话状态（模块级：面板卸载/重挂载之间存活）------------------------
+    // ---- 会话状态（apply 级：面板卸载/重挂载之间存活）------------------------
     var session = { terminalId: null, shellId: null, utf8: 'auto' };
     var pollTimer = null;
+    // 当前挂载面板的「结束会话」句柄（TerminalPane 挂载时登记）。
+    // 标签被用户关闭（paneClosed，2026-09-29）时调用 —— 关标签 = 终端会话
+    // 一并结束，下次打开按扩展设置里的默认终端开新会话。
+    var paneKill = null;
+    try {
+      ctx.api.events.on('paneClosed', function (data) {
+        var pane = data && data.pane;
+        if (pane === 'plugin:' + ctx.id + ':locus.terminal' && paneKill) {
+          paneKill();
+          paneKill = null;
+        }
+      });
+    } catch (e) {
+      // 未声明 events:subscribe 时静默降级：会话保持旧的「关面板不死」语义。
+    }
     var outBuf = '';
     var outTimer = null;
 
@@ -226,6 +241,7 @@ window.__OMP_PLUGIN__({
 
         return function () {
           alive = false;
+          paneKill = null;
           stopPolling();
           flushOut(session.terminalId);
           themeWatch.disconnect();
@@ -244,6 +260,9 @@ window.__OMP_PLUGIN__({
         if (termRef.current) termRef.current.write('\r\n[会话已结束]\r\n');
         setStatus('会话已结束 —— 点击任一终端按钮重新开启');
       }
+      // 登记到 apply 级：标签关闭（paneClosed）时由订阅者调用。
+      paneKill = killSession;
+
 
       // 面板只留「结束会话 + 状态」一行（shell/编码的选择归扩展设置 —— 面板
       // 不再承担设置职责，2026-09-29）。
