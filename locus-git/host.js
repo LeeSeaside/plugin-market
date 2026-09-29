@@ -102,6 +102,11 @@ function git(args, opts = {}) {
   if (!cwd || typeof cwd !== 'string') {
     return Promise.reject(new Error('未打开工作区（workspace 未注入）'));
   }
+  // cwd 不存在时 spawn 会报 **ENOENT** —— 与"exe 找不到"同形，曾被误诊为
+  // "找不到 git"。先校验并点名具体目录。
+  if (!fs.existsSync(cwd)) {
+    return Promise.reject(new Error('工作区目录不存在或不可访问：' + cwd + ' —— 请在设置里切换到有效的工作区'));
+  }
   const fullArgs = ['-c', 'core.quotepath=false', ...args];
   return new Promise((resolve, reject) => {
     execFile(
@@ -119,8 +124,8 @@ function git(args, opts = {}) {
           if (err.code === 'ENOENT') {
             reject(
               new Error(
-                '未找到 git 可执行文件。环境诊断：' + (resolveDiag || '(解析未运行)') +
-                ' —— 请安装 Git for Windows，或把其 cmd 目录加入系统 PATH',
+                'git spawn ENOENT。环境诊断：' + (resolveDiag || '(解析未运行)') +
+                ' ；cwd=' + cwd + '（若 cwd 存在仍 ENOENT，则确为 exe 问题）—— 请安装 Git for Windows 或把其 cmd 目录加入系统 PATH',
               ),
             );
             return;

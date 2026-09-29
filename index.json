@@ -1,18 +1,18 @@
 {
   "schema": 1,
-  "updatedAt": "2026-09-29T12:14:41.321Z",
+  "updatedAt": "2026-09-29T12:34:59.169Z",
   "plugins": [
     {
       "id": "com.locus.git",
       "name": "Git 工作台",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "apiVersion": 1,
       "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
       "path": "locus-git",
       "manifest": {
         "id": "com.locus.git",
         "name": "Git 工作台",
-        "version": "1.0.3",
+        "version": "1.0.4",
         "apiVersion": 1,
         "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
         "entry": {
@@ -41,12 +41,12 @@
         },
         {
           "name": "host.js",
-          "sha256": "3ca4045ce7d03e50d5af5fe5ed90c77fbc07e838233d205c5ba841cc3ea98d1b",
-          "bytes": 10450
+          "sha256": "5bde3e08d61f9c35d144f6ceb028b93ed0832d6b7502116c34a0d32257feb063",
+          "bytes": 10837
         },
         {
           "name": "manifest.json",
-          "sha256": "4c7cec4a05f21bb0833e57272d0da7b8807c68fe109abb75707a00408d187d7d",
+          "sha256": "221fcc467fa1cc09835978ede1cf26377c2c67a660eee47f7a5d4d3202414b2f",
           "bytes": 639
         }
       ]
