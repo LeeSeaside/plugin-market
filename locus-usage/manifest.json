@@ -1,9 +1,9 @@
 {
   "id": "com.locus.usage",
   "name": "用量统计",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "apiVersion": 1,
-  "description": "随应用分发的用量面板（mono-charts 单色圆角视觉）：KPI 大数字 + 迷你走势、逐日成本胶囊柱、活跃热力格、限额仪表环、供应商分段环与模型子弹条，宽度全自适应。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
+  "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
   "entry": {
     "client": "client.js"
   },

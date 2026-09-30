@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-09-30T01:06:27.049Z",
+  "updatedAt": "2026-09-30T02:35:18.754Z",
   "plugins": [
     {
       "id": "com.locus.git",
@@ -123,16 +123,16 @@
     {
       "id": "com.locus.usage",
       "name": "用量统计",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "apiVersion": 1,
-      "description": "随应用分发的用量面板（mono-charts 单色圆角视觉）：KPI 大数字 + 迷你走势、逐日成本胶囊柱、活跃热力格、限额仪表环、供应商分段环与模型子弹条，宽度全自适应。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
+      "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
       "path": "locus-usage",
       "manifest": {
         "id": "com.locus.usage",
         "name": "用量统计",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "apiVersion": 1,
-        "description": "随应用分发的用量面板（mono-charts 单色圆角视觉）：KPI 大数字 + 迷你走势、逐日成本胶囊柱、活跃热力格、限额仪表环、供应商分段环与模型子弹条，宽度全自适应。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
+        "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
         "entry": {
           "client": "client.js"
         },
@@ -154,8 +154,8 @@
       "files": [
         {
           "name": "client.js",
-          "sha256": "437a9ff0d44ea3f30080aa9396b7cbb456fb2ab0de5b61e53052e3b7b555c06c",
-          "bytes": 44206
+          "sha256": "28c54b87519137c592caefaf84e93d2e20a2d6c075ac91afec33a45c18edbc17",
+          "bytes": 1628896
         },
         {
           "name": "host.js",
@@ -164,8 +164,8 @@
         },
         {
           "name": "manifest.json",
-          "sha256": "b4e851235a75d25fb0d727416c603a306a16c9e2e6bc4cae87808ac5526295ae",
-          "bytes": 896
+          "sha256": "624ce16103b83d0e0b8ceb940f37f1d17c07f85332e6fb6cbaad778d597f199e",
+          "bytes": 1104
         }
       ]
     }
