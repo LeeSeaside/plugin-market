@@ -122,6 +122,23 @@ window.__OMP_PLUGIN__({
 
       R.useEffect(function () {
         load();
+        // 双订阅：paneOpened（每次切到本面板即重新取数，覆盖「切工作区再
+        // 切回来」「重开标签」；应用常发、不依赖事件桥版本）+ 
+        // workspaceChanged（标签关着时工作区变了，后台先刷好）。
+        try {
+          var offOpen = ctx.api.events.on('paneOpened', function (data) {
+            if (data && data.pane === 'plugin:' + ctx.id + ':locus.git') load();
+          });
+          var offWs = ctx.api.events.on('workspaceChanged', function () {
+            load();
+          });
+          return function () {
+            offOpen.dispose();
+            offWs.dispose();
+          };
+        } catch (e) {
+          return undefined;
+        }
       }, [load]);
 
       function act(promise, done) {

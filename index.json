@@ -1,18 +1,18 @@
 {
   "schema": 1,
-  "updatedAt": "2026-09-30T02:35:18.754Z",
+  "updatedAt": "2026-09-30T02:56:52.017Z",
   "plugins": [
     {
       "id": "com.locus.git",
       "name": "Git 工作台",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "apiVersion": 1,
       "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
       "path": "locus-git",
       "manifest": {
         "id": "com.locus.git",
         "name": "Git 工作台",
-        "version": "1.0.5",
+        "version": "1.0.6",
         "apiVersion": 1,
         "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
         "entry": {
@@ -37,8 +37,8 @@
       "files": [
         {
           "name": "client.js",
-          "sha256": "2b7ebbf69652b831c40a2d69fece10afb7bcf50b4b5200a0f56fe3704fe181f0",
-          "bytes": 11049
+          "sha256": "f071fe6e2355fa10a3d3e2ca4018c693b138d16ea76ce3c79030a11363a6f03b",
+          "bytes": 11778
         },
         {
           "name": "host.js",
@@ -47,7 +47,7 @@
         },
         {
           "name": "manifest.json",
-          "sha256": "626c027601414bd119b03cd1ef51606725555f79a74c940a822aad95f65fc937",
+          "sha256": "a6c3dcad9dc0e76683d6811609fe26eb51753d78f5c34dd4ab4a90d87f769fca",
           "bytes": 663
         }
       ]
@@ -123,14 +123,14 @@
     {
       "id": "com.locus.usage",
       "name": "用量统计",
-      "version": "1.3.0",
+      "version": "1.3.1",
       "apiVersion": 1,
       "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
       "path": "locus-usage",
       "manifest": {
         "id": "com.locus.usage",
         "name": "用量统计",
-        "version": "1.3.0",
+        "version": "1.3.1",
         "apiVersion": 1,
         "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
         "entry": {
@@ -154,8 +154,8 @@
       "files": [
         {
           "name": "client.js",
-          "sha256": "28c54b87519137c592caefaf84e93d2e20a2d6c075ac91afec33a45c18edbc17",
-          "bytes": 1628896
+          "sha256": "a4403e10e05f7751825c83c9fef5dda1fc8044381012a2fb2899407d73c4c50b",
+          "bytes": 1629072
         },
         {
           "name": "host.js",
@@ -164,7 +164,7 @@
         },
         {
           "name": "manifest.json",
-          "sha256": "624ce16103b83d0e0b8ceb940f37f1d17c07f85332e6fb6cbaad778d597f199e",
+          "sha256": "b81f81cf5002f68fc902ecec33da044e389861d592069b634a79f70576e4c4c1",
           "bytes": 1104
         }
       ]

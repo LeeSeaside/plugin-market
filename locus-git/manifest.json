@@ -1,7 +1,7 @@
 {
   "id": "com.locus.git",
   "name": "Git 工作台",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "apiVersion": 1,
   "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
   "entry": {
