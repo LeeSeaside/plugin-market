@@ -156,6 +156,18 @@ window.__OMP_PLUGIN__({
       function bump() { bumpUi(function (n) { return n + 1; }); }
       uiBumpRef.current = bump;
 
+      var s6 = R.useState('⠋'), spinFrame = s6[0], setSpinFrame = s6[1];
+      R.useEffect(function () {
+        if (!pendingNew) return undefined;
+        var frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        var i = 0;
+        var timer = setInterval(function () {
+          i = (i + 1) % frames.length;
+          setSpinFrame(frames[i]);
+        }, 100);
+        return function () { clearInterval(timer); };
+      }, [uiTick]);
+
       // 挂载：容器就绪后把已有标签的 DOM 重新挂回来（插件重载会整树重建），
       // 并建首屏首标签（打开面板没有终端就新建一个）。
       R.useEffect(function () {
@@ -277,15 +289,22 @@ window.__OMP_PLUGIN__({
         ]));
       });
 
+      if (pendingNew > 0) {
+        tabBtns.push(h(ctx.beui.Button, {
+          key: 'pending', size: 'sm', variant: 'ghost', disabled: true,
+          'data-locus-term-pending': '1',
+        }, spinFrame + ' 启动中…'));
+      }
+
       var toolbar = h('div', { 'data-locus-term-toolbar': '1', style: {
         display: 'flex', gap: '4px', alignItems: 'center',
         padding: '4px 6px', flexWrap: 'wrap',
       } }, tabBtns.concat([
         h(ctx.beui.Button, {
           key: 'add', size: 'sm', variant: 'ghost', 'data-locus-term-add': '1',
-          disabled: tabs.length >= 4,
+          disabled: tabs.length >= 4 || pendingNew > 0,
           onClick: function () { newRef.current(); },
-        }, '＋'),
+        }, pendingNew > 0 ? spinFrame : '＋'),
       ]));
 
       return h('div', { style: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column' } }, [
@@ -301,17 +320,29 @@ window.__OMP_PLUGIN__({
         }, tabs.length
           ? null
           : h('div', { key: 'empty', style: {
-              position: 'absolute', inset: 0, display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-            } }, h(ctx.beui.Button, {
-              key: 'new', size: 'sm', variant: 'primary',
-              'data-locus-term-new': '1',
-              onClick: function () { newRef.current(); },
-            }, '新建终端'))),
+              position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+              gap: '8px', alignItems: 'center', justifyContent: 'center',
+            } }, [
+              pendingNew > 0
+                ? h('div', { key: 'loading', 'data-locus-term-starting': '1' }, spinFrame + ' 正在启动终端…')
+                : null,
+              lastNewError
+                ? h('div', { key: 'err', style: { color: 'var(--warn)' } }, '启动失败：' + lastNewError)
+                : null,
+              pendingNew > 0
+                ? null
+                : h(ctx.beui.Button, {
+                    key: 'new', size: 'sm', variant: 'primary',
+                    'data-locus-term-new': '1',
+                    onClick: function () { newRef.current(); },
+                  }, '新建终端'),
+            ])),
       ]);
     }
 
     // ---- 命令式会话管理（React 树之外，div 由这里直接挂）----------------------
+    var pendingNew = 0; // 进行中的 term.open 数（0 或 1；＋ 串行化）
+    var lastNewError = null; // 最近一次创建失败原因（空态显示）
     var viewEl = null; // 挂载 effect 回填
     var uiBumpRef = { current: function () {} };
     var fitRef = { current: function () {} };
@@ -336,6 +367,9 @@ window.__OMP_PLUGIN__({
     }
     function newRefApply() {
       var term = null, fit = null, div = null, tab = null;
+      pendingNew++;
+      lastNewError = null;
+      uiBumpRef.current();
       Promise.all([
         shellsCache
           ? Promise.resolve({ shells: shellsCache })
@@ -402,6 +436,7 @@ window.__OMP_PLUGIN__({
             /* 布局未就绪，ResizeObserver 会补 */
           }
           armPolling();
+          pendingNew = Math.max(0, pendingNew - 1);
           uiBumpRef.current();
         })
         .catch(function (e) {
@@ -413,6 +448,9 @@ window.__OMP_PLUGIN__({
           } else if (viewEl) {
             viewEl.setAttribute('data-locus-term-error', String((e && e.message) || e));
           }
+          lastNewError = String((e && e.message) || e);
+          pendingNew = Math.max(0, pendingNew - 1);
+          uiBumpRef.current();
         });
     }
     newRef.current = newRefApply;
@@ -425,6 +463,7 @@ window.__OMP_PLUGIN__({
       }
       tabs = [];
       activeKey = null;
+      pendingNew = 0;
       stopPolling();
       uiBumpRef.current();
     }

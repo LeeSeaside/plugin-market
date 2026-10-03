@@ -182,6 +182,15 @@ function buildProfiles() {
   return profiles;
 }
 
+// 探测是同步 exec（reg.exe / wsl.exe，最坏各 5s 超时；WSL 冷启动可达数秒），
+// 而 profiles 在进程生命周期内基本不变 —— 缓存一份，避免每次 term.open 都
+// 重新探测导致新建终端卡数秒。装了新 shell 要刷新列表：扩展页「重载」即可。
+let profilesCache = null;
+function getProfiles() {
+  if (!profilesCache) profilesCache = buildProfiles();
+  return profilesCache;
+}
+
 function getSession(id) {
   const s = sessions.get(id);
   if (!s) throw new Error(`终端会话不存在（可能已随插件重启清空）：${id}`);
@@ -207,7 +216,7 @@ export function activate(host) {
     async request(method, params = {}) {
       switch (method) {
         case 'shells.list': {
-          const profiles = buildProfiles();
+          const profiles = getProfiles();
           return {
             shells: profiles.map((p) => ({
               id: p.id,
@@ -219,7 +228,7 @@ export function activate(host) {
         }
 
         case 'term.open': {
-          const profiles = buildProfiles();
+          const profiles = getProfiles();
           const wanted = String(params.shellId ?? 'auto');
           const utf8 = params.utf8 !== 'native';
           const profile =
