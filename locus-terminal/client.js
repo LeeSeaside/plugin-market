@@ -245,6 +245,7 @@ window.__OMP_PLUGIN__({
           setTimeout(function () { refitActive(); }, 0);
         }
       }
+      showRef.current = showActive;
 
       function closeTab(key) {
         var tab = tabByKey(key);
@@ -373,6 +374,7 @@ window.__OMP_PLUGIN__({
     var viewEl = null; // 挂载 effect 回填
     var uiBumpRef = { current: function () {} };
     var fitRef = { current: function () {} };
+    var showRef = { current: function () {} }; // 新建标签时隐藏旧会话 div（桥出 TerminalPane 作用域）
     var switchRef = { current: function () {} };
     var closeRef = { current: function () {} };
     var newRef = { current: function () {} };
@@ -433,6 +435,7 @@ window.__OMP_PLUGIN__({
           div.style.width = '100%';
           div.style.height = '100%';
           div.style.display = 'none';
+          div.style.backgroundColor = 'var(--bg-base)';
           term.open(div);
           term.onData(function (data) {
             queueWrite(opened.terminalId, data);
@@ -456,7 +459,7 @@ window.__OMP_PLUGIN__({
           activeKey = tab.key;
           if (viewEl) {
             viewEl.appendChild(div);
-            div.style.display = 'block';
+            showRef.current();
           }
           try {
             fit.fit();
