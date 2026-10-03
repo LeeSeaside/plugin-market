@@ -246,20 +246,33 @@ window.__OMP_PLUGIN__({
       var tabBtns = [];
       tabs.forEach(function (tab) {
         var active = tab.key === activeKey;
-        tabBtns.push(h('span', {
+        tabBtns.push(h(ctx.beui.Button, {
           key: tab.key,
-          style: { display: 'inline-flex', alignItems: 'center', gap: '2px' },
+          size: 'sm',
+          variant: active ? 'primary' : 'ghost',
+          'data-locus-term-tab': tab.key,
+          onClick: function () { switchRef.current(tab.key); },
         }, [
-          h(ctx.beui.Button, {
-            key: 't', size: 'sm',
-            variant: active ? 'primary' : 'ghost',
-            'data-locus-term-tab': tab.key,
-            onClick: function () { switchRef.current(tab.key); },
-          }, tab.name + (tab.exited ? '（已退出）' : '')),
-          h(ctx.beui.Button, {
-            key: 'x', size: 'sm', variant: 'ghost',
+          h('span', { key: 'l' }, tab.name + (tab.exited ? '（已退出）' : '')),
+          h('span', {
+            key: 'x',
             'data-locus-term-tab-close': tab.key,
-            onClick: function () { closeRef.current(tab.key); },
+            onClick: function (e) {
+              e.stopPropagation();
+              closeRef.current(tab.key);
+            },
+            style: {
+              marginLeft: '6px', padding: '0 4px', borderRadius: '4px',
+              opacity: '0.65', cursor: 'pointer', lineHeight: '1',
+            },
+            onMouseEnter: function (e) {
+              e.currentTarget.style.opacity = '1';
+              e.currentTarget.style.backgroundColor = 'var(--bg-active)';
+            },
+            onMouseLeave: function (e) {
+              e.currentTarget.style.opacity = '0.65';
+              e.currentTarget.style.backgroundColor = 'transparent';
+            },
           }, '×'),
         ]));
       });
