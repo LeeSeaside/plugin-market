@@ -11,14 +11,27 @@
  *   params.workspace  活动工作区绝对路径（每次调用注入，防过期）
  *
  * 方法面（全部 cwd=workspace）：
- *   git.status  {}                        → { branch, upstream, ahead, behind, files[] }
- *   git.log     { n? }                    → [{ hash, short, author, date, subject }]
- *   git.diff    { path?, cached? }        → { text }
- *   git.stage   { paths: string[] }       → { ok: true }（'.' = 全部）
- *   git.unstage { paths: string[] }       → { ok: true }
- *   git.commit  { message }               → { ok: true, output }
- *   git.push    {}                        → { ok: true, output }
- *   git.pull    {}                        → { ok: true, output }
+ *   git.status    {}                        → { branch, upstream, ahead, behind, files[] }
+ *   git.log       { n? }                    → [{ hash, short, author, date, subject, parents[], refs[] }]
+ *   git.diff      { path?, cached? }        → { text }
+ *   git.stage     { paths: string[] }       → { ok: true }（'.' = 全部）
+ *   git.unstage   { paths: string[] }       → { ok: true }
+ *   git.commit    { message }               → { ok: true, output }
+ *   git.push      {}                        → { ok: true, output }
+ *   git.pull      {}                        → { ok: true, output }
+ *   git.branches  {}                        → [{ name, current }]
+ *   git.branchCreate  { name }              → { ok: true }（新建并切换）
+ *   git.branchSwitch  { name }              → { ok: true }
+ *   git.stashList {}                        → [{ ref, subject }]
+ *   git.stash     { message? }              → { ok: true }（含未跟踪，-u）
+ *   git.stashPop  {}                        → { ok: true }
+ *   git.version   {}                        → { v, watched }
+ *
+ * 文件监听（1.1.0）：fs.watch(workspace, recursive) 自盯工作区（忽略 .git/），
+ * 800ms 防抖后递增内存版本号；渲染半 2s 轮询 git.version（零 git 调用），
+ * 版本变了才拉全量 —— 事件桥不通渲染层（fanoutDeskEvent 只达插件进程），
+ * 「计数器 + 轮询」是免核心改动的推送等价物。平台不支持 recursive 时静默
+ * 降级（watched=false），客户端回到既有的手动刷新路径。
  */
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -28,6 +41,7 @@ const LOCAL_TIMEOUT_MS = 15_000;
 const NET_TIMEOUT_MS = 90_000;
 const MAX_BUFFER = 512 * 1024;
 const DEFAULT_LOG_N = 30;
+const WATCH_DEBOUNCE_MS = 800;
 
 /** git.exe 解析缓存（解析一次，进程内复用）。 */
 let gitExe = null;
@@ -194,15 +208,49 @@ function parseStatus(text) {
   return out;
 }
 
-/** %H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e 解析。 */
+/** %H%x1f…%P%x1f%D%x1e 解析。parents 按 ' ' 拆，refs 按 ', ' 拆（空 → []）。 */
 function parseLog(text) {
   return text
     .split('\x1e')
     .map((s) => s.replace(/^[\r\n]+/, '').replace(/[\r\n]+$/, ''))
     .filter((s) => s.length > 0)
     .map((s) => {
-      const [hash, short, author, date, ...subject] = s.split('\x1f');
-      return { hash, short, author, date, subject: subject.join('\x1f') };
+      const [hash, short, author, date, subject, parents, refs] = s.split('\x1f');
+      return {
+        hash,
+        short,
+        author,
+        date,
+        subject: typeof subject === 'string' ? subject : '',
+        parents: parents ? parents.split(' ').filter(Boolean) : [],
+        refs: refs ? refs.split(', ').map((r) => r.trim()).filter(Boolean) : [],
+      };
+    });
+}
+
+/** git stash list 行（%gd%x1f%gs%x1e）解析。 */
+function parseStashList(text) {
+  return text
+    .split('\x1e')
+    .map((s) => s.replace(/^[\r\n]+/, '').replace(/[\r\n]+$/, ''))
+    .filter((s) => s.length > 0)
+    .map((s) => {
+      const [ref, subject] = s.split('\x1f');
+      return { ref, subject: subject ?? '' };
+    });
+}
+
+/** git branch --format=%(refname:short)%00%(HEAD) 解析 → [{ name, current }]。 */
+function parseBranches(text) {
+  return text
+    .split('\n')
+    .map((l) => l.replace(/\r$/, ''))
+    .filter(Boolean)
+    .map((l) => {
+      const idx = l.indexOf('\x00');
+      const name = idx >= 0 ? l.slice(0, idx) : l;
+      const head = idx >= 0 ? l.slice(idx + 1) : '';
+      return { name, current: head.trim() === '*' };
     });
 }
 
@@ -215,7 +263,14 @@ async function logRequest(params) {
   const n = Math.min(Math.max(Number(params.n) || DEFAULT_LOG_N, 1), 200);
   try {
     const text = await git(
-      ['log', `-n`, String(n), '--date=format:%Y-%m-%d %H:%M', '--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e'],
+      [
+        'log',
+        `-n`,
+        String(n),
+        '--date=format:%Y-%m-%d %H:%M',
+        // 1.1.0：追加 %P（parents，提交图车道用）与 %D（refs，徽标用）
+        '--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%P%x1f%D%x1e',
+      ],
       { cwd: params.workspace },
     );
     return parseLog(text);
@@ -238,8 +293,76 @@ async function pathsOf(params) {
   throw new Error('需要 paths（字符串数组或 "."）');
 }
 
+/* ---- 文件监听（1.1.0）----------------------------------------------------
+ * 一个插件进程同时只盯一个工作区（workspace 注入随每次调用，切换时重挂）。
+ * 忽略 .git/ 下的事件：status/add/commit 都写 .git，不过滤会自激。 */
+let watcher = null;
+let watchedDir = null;
+let watchVersion = 0;
+let debounceTimer = null;
+
+function bumpVersion() {
+  watchVersion += 1;
+}
+
+function onWatchEvent(filename) {
+  if (typeof filename === 'string' && filename) {
+    const norm = filename.replace(/\\/g, '/');
+    if (norm === '.git' || norm.startsWith('.git/')) return;
+  }
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(bumpVersion, WATCH_DEBOUNCE_MS);
+  // 不阻塞插件进程退出
+  debounceTimer.unref?.();
+}
+
+function ensureWatcher(workspace) {
+  if (watchedDir === workspace && watcher) return;
+  teardownWatcher();
+  watchedDir = workspace;
+  try {
+    // recursive 仅 Windows/macOS 支持；Linux 抛错 → 静默降级（watched=false）
+    watcher = fs.watch(workspace, { recursive: true }, onWatchEvent);
+    watcher.on('error', () => {
+      teardownWatcher();
+      watchedDir = workspace; // 目录没变，只是不再监听
+    });
+  } catch {
+    watcher = null;
+  }
+}
+
+function teardownWatcher() {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+  if (watcher) {
+    try {
+      watcher.close();
+    } catch {
+      /* 已关 */
+    }
+  }
+  watcher = null;
+  watchedDir = null;
+}
+
+/** 分支名校验：拒绝空串/前导'-'/'..'与 git 引用非法字符（~:^?*[\\ 与空白）。 */
+function validRefName(name) {
+  return (
+    typeof name === 'string' &&
+    name.length > 0 &&
+    name.length <= 200 &&
+    !name.startsWith('-') &&
+    !name.includes('..') &&
+    !/[\s~:^?*\[\\]/.test(name)
+  );
+}
+
 export async function activate(host) {
   host.log('info', 'git 工作台 host 半已激活');
+  process.on('exit', teardownWatcher);
 
   return {
     async request(method, params = {}) {
@@ -281,6 +404,46 @@ export async function activate(host) {
             timeoutMs: NET_TIMEOUT_MS,
           });
           return { ok: true, output: output.trim() };
+        }
+        case 'git.branches': {
+          const text = await git(['branch', '--list', '--format=%(refname:short)%00%(HEAD)'], {
+            cwd: params.workspace,
+          });
+          return parseBranches(text);
+        }
+        case 'git.branchCreate': {
+          const name = typeof params.name === 'string' ? params.name.trim() : '';
+          if (!validRefName(name)) throw new Error('非法分支名：' + (name || '（空）'));
+          await git(['checkout', '-b', name], { cwd: params.workspace });
+          return { ok: true };
+        }
+        case 'git.branchSwitch': {
+          const name = typeof params.name === 'string' ? params.name.trim() : '';
+          if (!validRefName(name)) throw new Error('非法分支名：' + (name || '（空）'));
+          await git(['checkout', name], { cwd: params.workspace });
+          return { ok: true };
+        }
+        case 'git.stashList': {
+          const text = await git(['stash', 'list', '--format=%gd%x1f%gs%x1e'], {
+            cwd: params.workspace,
+          });
+          return parseStashList(text);
+        }
+        case 'git.stash': {
+          const args = ['stash', 'push', '-u'];
+          if (typeof params.message === 'string' && params.message.trim()) {
+            args.push('-m', params.message.trim());
+          }
+          await git(args, { cwd: params.workspace });
+          return { ok: true };
+        }
+        case 'git.stashPop': {
+          await git(['stash', 'pop'], { cwd: params.workspace });
+          return { ok: true };
+        }
+        case 'git.version': {
+          ensureWatcher(params.workspace);
+          return { v: watchVersion, watched: watcher !== null };
         }
         default:
           throw new Error(`未知方法：${method}`);
