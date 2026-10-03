@@ -233,7 +233,10 @@ window.__OMP_PLUGIN__({
         var view = viewRef.current;
         if (!view) return;
         for (var i = 0; i < view.children.length; i++) {
-          view.children[i].style.display = 'none';
+          var child = view.children[i];
+          if (child.getAttribute && child.getAttribute('data-locus-term-session')) {
+            child.style.display = 'none';
+          }
         }
         var tab = tabByKey(activeKey);
         if (tab && tab.div) {
