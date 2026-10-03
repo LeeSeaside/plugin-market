@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "updatedAt": "2026-09-30T02:56:52.017Z",
+  "updatedAt": "2026-10-03T08:53:17.481Z",
   "plugins": [
     {
       "id": "com.locus.git",
       "name": "Git 工作台",
-      "version": "1.0.6",
+      "version": "1.1.0",
       "apiVersion": 1,
-      "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
+      "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull、提交历史（SVG 车道提交图 + refs 徽标）、染色 diff、分支切换/新建、stash，host 半 fs.watch 监听工作区自动刷新（.git 除外，降级安全）。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
       "path": "locus-git",
       "manifest": {
         "id": "com.locus.git",
         "name": "Git 工作台",
-        "version": "1.0.6",
+        "version": "1.1.0",
         "apiVersion": 1,
-        "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull 与提交历史。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
+        "description": "随应用分发的 Git 面板：变更暂存、提交、push/pull、提交历史（SVG 车道提交图 + refs 徽标）、染色 diff、分支切换/新建、stash，host 半 fs.watch 监听工作区自动刷新（.git 除外，降级安全）。Host 半为全权 Node runner（直接执行 git，凭据走系统 credential helper），写入能力与用户在终端操作同权（信任模型 X）。",
         "entry": {
           "client": "client.js"
         },
@@ -37,32 +37,32 @@
       "files": [
         {
           "name": "client.js",
-          "sha256": "f071fe6e2355fa10a3d3e2ca4018c693b138d16ea76ce3c79030a11363a6f03b",
-          "bytes": 11778
+          "sha256": "22b496daa1cd0b29bd1395dffb0ebd3fff4b9132b9b4b954613a80328dd68d2d",
+          "bytes": 26001
         },
         {
           "name": "host.js",
-          "sha256": "5bde3e08d61f9c35d144f6ceb028b93ed0832d6b7502116c34a0d32257feb063",
-          "bytes": 10837
+          "sha256": "87b60415e6c0e88d9f6417e8f05ac5bdfb6edaf6a9328821d5356712f8f98bef",
+          "bytes": 16645
         },
         {
           "name": "manifest.json",
-          "sha256": "a6c3dcad9dc0e76683d6811609fe26eb51753d78f5c34dd4ab4a90d87f769fca",
-          "bytes": 663
+          "sha256": "54dc25f8456703598a8beb0337f0522527a03415efe0e37c2b135eaf22344a79",
+          "bytes": 825
         }
       ]
     },
     {
       "id": "com.locus.terminal",
       "name": "终端",
-      "version": "1.3.0",
+      "version": "1.4.1",
       "apiVersion": 1,
       "description": "交互式终端面板：自动识别系统可用 shell（PowerShell / pwsh / CMD / Git Bash / WSL 发行版），支持选择默认终端与编码模式（强制 UTF-8 / 原生），宿主 PTY 会话跨面板切换存活。Host 半经宿主 PTY（@lydell/node-pty）spawn 真实终端进程。",
       "path": "locus-terminal",
       "manifest": {
         "id": "com.locus.terminal",
         "name": "终端",
-        "version": "1.3.0",
+        "version": "1.4.1",
         "apiVersion": 1,
         "description": "交互式终端面板：自动识别系统可用 shell（PowerShell / pwsh / CMD / Git Bash / WSL 发行版），支持选择默认终端与编码模式（强制 UTF-8 / 原生），宿主 PTY 会话跨面板切换存活。Host 半经宿主 PTY（@lydell/node-pty）spawn 真实终端进程。",
         "entry": {
@@ -105,17 +105,17 @@
       "files": [
         {
           "name": "client.js",
-          "sha256": "89fb1cccf69dc8d9b711c2c39d60aeab98d74e56759390546029e311d0ac7b13",
-          "bytes": 16632
+          "sha256": "bdad504229cad1e66921cf2c0c3c885b76ee7b95b02386fee38e0710ebbd5fa0",
+          "bytes": 21054
         },
         {
           "name": "host.js",
-          "sha256": "e680a9b41ccadf3dc76e783bf677bd33745dfaac0c42227a74d9c44048438d8b",
-          "bytes": 9953
+          "sha256": "f1d9f1e35c66556014a61273ed9ce2513c7e33f9c506f01db93ad0e9cf776926",
+          "bytes": 10150
         },
         {
           "name": "manifest.json",
-          "sha256": "a8a9641b24c70ab0e7b056597f1f62650f00005672885971bedb7683d26401b2",
+          "sha256": "6c4a83bb5598d38cd7d143f99cd27ffdd48528f81ba711e426b39f96ed9f1538",
           "bytes": 1246
         }
       ]
@@ -123,16 +123,16 @@
     {
       "id": "com.locus.usage",
       "name": "用量统计",
-      "version": "1.3.1",
+      "version": "1.4.0",
       "apiVersion": 1,
-      "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
+      "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。1.4.0 新增维度过滤（供应商/模型 gooey 下拉，facets 驱动）、24 小时逐小时桶与「全部」档、区间指标条（缓存命中率 / 生成 TPS / TTFT / 错误数 / 缓存节省）。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
       "path": "locus-usage",
       "manifest": {
         "id": "com.locus.usage",
         "name": "用量统计",
-        "version": "1.3.1",
+        "version": "1.4.0",
         "apiVersion": 1,
-        "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
+        "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。1.4.0 新增维度过滤（供应商/模型 gooey 下拉，facets 驱动）、24 小时逐小时桶与「全部」档、区间指标条（缓存命中率 / 生成 TPS / TTFT / 错误数 / 缓存节省）。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
         "entry": {
           "client": "client.js"
         },
@@ -154,18 +154,18 @@
       "files": [
         {
           "name": "client.js",
-          "sha256": "a4403e10e05f7751825c83c9fef5dda1fc8044381012a2fb2899407d73c4c50b",
-          "bytes": 1629072
+          "sha256": "aa6b650aa24ab9f2f486b0f65ac767f650946cd6cd71005d4be23a0b0c69cf56",
+          "bytes": 1632228
         },
         {
           "name": "host.js",
-          "sha256": "5d4fa0ab1549e6503c865b5487d2126d4c35be720d9ac6ab27013c099d1774cd",
-          "bytes": 8789
+          "sha256": "33963fc353d2b118e2c067979bd77798975c814593bb9decaebf2406ffeb63e3",
+          "bytes": 13122
         },
         {
           "name": "manifest.json",
-          "sha256": "b81f81cf5002f68fc902ecec33da044e389861d592069b634a79f70576e4c4c1",
-          "bytes": 1104
+          "sha256": "bf693021b87deec7843d334b6a4f4a896d21a1886f99e66e77a77daadfa7afc4",
+          "bytes": 1310
         }
       ]
     }

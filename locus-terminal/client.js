@@ -1,9 +1,14 @@
 /**
- * com.locus.terminal · Client 半（同页求值工厂）
+ * com.locus.terminal · Client 半（同页求值工厂）—— 多终端标签版（2026-09-30）
  *
- * 面板：工具栏（shell 按钮组 / UTF-8 开关 / 结束会话）+ xterm 终端区。
- * 数据流：击键 → rpc term.write（8ms 合并）；输出 → 50ms 轮询 term.read；
- * 会话在 host 半存活（面板切走再回来 attach 回放，不丢画面/不杀进程）。
+ * 交互模型（用户拍板，对标 VS Code 集成终端）：
+ *   - 面板内多终端标签：每标签一个独立 xterm + 独立 PTY（宿主 MAX_SESSIONS=4）；
+ *   - 打开面板：没有终端就新建一个，有就只是隐藏/显示 —— 会话全活；
+ *   - 关掉面板（工作台标签收走）才把所有终端杀光（paneClosed → 全杀）；
+ *   - 标签 × 单杀一个；＋ 新建；关到最后一个 → 空态 +「新建终端」按钮。
+ *
+ * 数据流：击键 → rpc term.write（8ms 合并）；输出 → 单一定时器轮询所有
+ * 存活会话的 term.read（50ms）；会话在 host 半存活，面板切走再回来不动它。
  *
  * 终端渲染用宿主共享的 ctx.xterm（与 ctx.React 同理：自带一份会双实例）。
  * 主题：xterm 是 canvas，吃不到 CSS 变量 —— 喂实际色值并监听主题切换重喂
@@ -17,25 +22,35 @@ window.__OMP_PLUGIN__({
     var FitAddon = ctx.xterm.FitAddon;
 
     // ---- 会话状态（apply 级：面板卸载/重挂载之间存活）------------------------
-    var session = { terminalId: null, shellId: null, utf8: 'auto' };
+    // tab = { key, id:terminalId, baseName, name, exited, term, fit, div }
+    var tabs = [];
+    var activeKey = null; // 当前显示标签的稳定 key（进程退出后 id 会被置空）
+    var shellsCache = null; // shells.list 结果缓存（新建标签时用）
     var pollTimer = null;
-    // 当前挂载面板的「结束会话」句柄（TerminalPane 挂载时登记）。
-    // 标签被用户关闭（paneClosed，2026-09-29）时调用 —— 关标签 = 终端会话
-    // 一并结束，下次打开按扩展设置里的默认终端开新会话。
-    var paneKill = null;
+    var outBufs = {}; // terminalId → 待写缓冲
+    var outTimer = null;
+    var seq = 0;
+
     try {
       ctx.api.events.on('paneClosed', function (data) {
         var pane = data && data.pane;
-        if (pane === 'plugin:' + ctx.id + ':locus.terminal' && paneKill) {
-          paneKill();
-          paneKill = null;
-        }
+        if (pane === 'plugin:' + ctx.id + ':locus.terminal') killAll();
       });
     } catch (e) {
       // 未声明 events:subscribe 时静默降级：会话保持旧的「关面板不死」语义。
     }
-    var outBuf = '';
-    var outTimer = null;
+    try {
+      ctx.api.events.on('paneOpened', function (data) {
+        var pane = data && data.pane;
+        if (pane === 'plugin:' + ctx.id + ':locus.terminal') {
+          // 打开面板：有终端就只是显示；没有就新建一个（用户拍板的语义）。
+          if (!tabs.length) newTerminal();
+          else fitRef.current();
+        }
+      });
+    } catch (e) {
+      /* 同上：无事件订阅时面板内「＋」兜底。 */
+    }
 
     function rpc(method, params) {
       return ctx.api.invoke('omp:plugin-host:invoke', {
@@ -45,19 +60,24 @@ window.__OMP_PLUGIN__({
       });
     }
 
-    function flushOut(terminalId) {
-      if (!outBuf) return;
-      var data = outBuf;
-      outBuf = '';
-      rpc('term.write', { terminalId: terminalId, data: data }).catch(function () {});
+    // ---- 输出合并写回 ---------------------------------------------------------
+    function flushOut() {
+      var ids = Object.keys(outBufs);
+      if (!ids.length) return;
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        var data = outBufs[id];
+        if (!data) continue;
+        delete outBufs[id];
+        rpc('term.write', { terminalId: id, data: data }).catch(function () {});
+      }
     }
-
     function queueWrite(terminalId, data) {
-      outBuf += data;
+      outBufs[terminalId] = (outBufs[terminalId] || '') + data;
       if (outTimer) return;
       outTimer = setTimeout(function () {
         outTimer = null;
-        flushOut(terminalId);
+        flushOut();
       }, 8);
     }
 
@@ -66,6 +86,29 @@ window.__OMP_PLUGIN__({
         clearInterval(pollTimer);
         pollTimer = null;
       }
+    }
+    function armPolling() {
+      if (pollTimer) return;
+      pollTimer = setInterval(function () {
+        for (var i = 0; i < tabs.length; i++) {
+          pollOne(tabs[i]);
+        }
+      }, 50);
+    }
+    function pollOne(tab) {
+      if (tab.exited || !tab.id) return;
+      rpc('term.read', { terminalId: tab.id })
+        .then(function (resp) {
+          if (resp.data && tab.term) tab.term.write(resp.data);
+          if (resp.exited) {
+            tab.exited = true;
+            tab.id = null; // PTY 已终结：标签保留（缓冲可看），可「＋」或点原标签切换
+            uiBumpRef.current();
+          }
+        })
+        .catch(function () {
+          /* 单次读取失败静默 —— runner 重启后 attach 语义由下次打开接管 */
+        });
     }
 
     // ---- xterm 主题（canvas 不吃 CSS 变量，喂实际值）------------------------
@@ -106,190 +149,270 @@ window.__OMP_PLUGIN__({
       };
     }
 
-    // ---- 终端面板 ------------------------------------------------------------
+    // ---- 面板（tab 条 + 终端区）----------------------------------------------
     function TerminalPane() {
-      var containerRef = R.useRef(null);
-      var termRef = R.useRef(null);
-      var s2 = R.useState(''), status = s2[0], setStatus = s2[1];
+      var viewRef = R.useRef(null);
+      var s5 = R.useState(0), uiTick = s5[0], bumpUi = s5[1];
+      function bump() { bumpUi(function (n) { return n + 1; }); }
+      uiBumpRef.current = bump;
 
-      var startSession = R.useCallback(function (shellId) {
-        var term = termRef.current;
-        if (!term) return;
-        var wantUtf8 = session.utf8 !== 'native';
-        stopPolling();
-        var openAndPoll = function () {
-          rpc('term.open', { shellId: shellId, utf8: session.utf8 })
-            .then(function (r) {
-              session.terminalId = r.terminalId;
-              session.shellId = r.profile.id;
-              setStatus('已连接 · ' + r.profile.name);
-              pollTimer = setInterval(function () {
-                rpc('term.read', { terminalId: session.terminalId })
-                  .then(function (resp) {
-                    if (resp.data) term.write(resp.data);
-                    if (resp.exited) {
-                      stopPolling();
-                      setStatus('进程已退出（code ' + resp.exitCode + '）—— 点击任一终端按钮重新开启');
-                    }
-                  })
-                  .catch(function (e) {
-                    stopPolling();
-                    setStatus('读取失败：' + (e && e.message ? e.message : String(e)));
-                  });
-              }, 50);
-            })
-            .catch(function (e) {
-              setStatus('启动失败：' + (e && e.message ? e.message : String(e)));
-            });
-        };
-        if (session.terminalId) {
-          rpc('term.close', { terminalId: session.terminalId })
-            .catch(function () {})
-            .then(openAndPoll);
-        } else {
-          openAndPoll();
-        }
-      }, []);
-
-      // 挂载：建 xterm → shells.list → 首次开会话 / 重挂载 attach 回放。
+      // 挂载：容器就绪后把已有标签的 DOM 重新挂回来（插件重载会整树重建），
+      // 并建首屏首标签（打开面板没有终端就新建一个）。
       R.useEffect(function () {
-        var container = containerRef.current;
-        if (!container) return undefined;
-        var term = new XTerm({
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace',
-          fontSize: 13,
-          lineHeight: 1.2,
-          cursorBlink: true,
-          theme: buildTermTheme(),
-        });
-        var fit = new FitAddon();
-        term.loadAddon(fit);
-        term.open(container);
-        termRef.current = term;
-        try {
-          fit.fit();
-        } catch (e) {
-          /* 布局未就绪，ResizeObserver 会补 */
+        var view = viewRef.current;
+        if (!view) return undefined;
+        viewEl = view;
+        for (var i = 0; i < tabs.length; i++) {
+          view.appendChild(tabs[i].div);
         }
-        term.onData(function (data) {
-          if (session.terminalId) queueWrite(session.terminalId, data);
-        });
-        term.onResize(function (size) {
-          if (session.terminalId) {
-            rpc('term.resize', { terminalId: session.terminalId, cols: size.cols, rows: size.rows }).catch(function () {});
-          }
-        });
-
-        var alive = true;
-        var boot = Promise.all([
-          rpc('shells.list', {}).catch(function () { return { shells: [] }; }),
-          ctx.api.settings.get('default_shell').catch(function () { return 'auto'; }),
-          ctx.api.settings.get('utf8_mode').catch(function () { return 'auto'; }),
-        ]).then(function (r) {
-          if (!alive) return;
-          session.utf8 = r[2] === 'native' ? 'native' : 'auto';
-          var want = r[1] && r[1] !== 'auto' ? r[1] : 'auto';
-          var pick = null;
-          if (want !== 'auto') {
-            pick = (r[0].shells || []).filter(function (s) { return s.id === want; })[0] || null;
-          }
-          var shellId = pick ? pick.id : 'auto';
-          if (session.terminalId) {
-            // 面板重挂载：会话还活着 —— attach 回放续轮询，不重开进程。
-            rpc('term.attach', { terminalId: session.terminalId })
-              .then(function (resp) {
-                if (!alive || !termRef.current) return;
-                if (resp.replay) term.write(resp.replay);
-                setStatus('已恢复会话');
-                pollTimer = setInterval(function () {
-                  rpc('term.read', { terminalId: session.terminalId })
-                    .then(function (x) {
-                      if (x.data) term.write(x.data);
-                      if (x.exited) {
-                        stopPolling();
-                        setStatus('进程已退出（code ' + x.exitCode + '）');
-                      }
-                    })
-                    .catch(function () {});
-                }, 50);
-              })
-              .catch(function () {
-                // 会话已随插件重启清空 —— 重开。
-                session.terminalId = null;
-                startSession(shellId);
-              });
-          } else {
-            startSession(shellId);
-          }
-        });
-
+        showActive();
+        if (!tabs.length) newTerminal();
         var ro = new ResizeObserver(function () {
-          try {
-            fit.fit();
-          } catch (e) {
-            /* ignore */
-          }
+          refitActive();
         });
-        ro.observe(container);
+        ro.observe(view);
         var themeWatch = new MutationObserver(function () {
-          term.options.theme = buildTermTheme();
+          var theme = buildTermTheme();
+          for (var j = 0; j < tabs.length; j++) {
+            if (tabs[j].term) tabs[j].term.options.theme = theme;
+          }
         });
         themeWatch.observe(document.documentElement, {
           attributes: true,
           attributeFilter: ['class', 'data-theme'],
         });
-
         return function () {
-          alive = false;
-          paneKill = null;
-          stopPolling();
-          flushOut(session.terminalId);
           themeWatch.disconnect();
           ro.disconnect();
-          termRef.current = null;
-          term.dispose();
+          viewEl = null;
+          // 面板卸载（插件重载）= 渲染层整体重建：杀光会话，状态同步清零。
+          killAll();
         };
         // 仅挂载时初始化一次。
       }, []);
 
-      function killSession() {
-        if (!session.terminalId) return;
-        rpc('term.close', { terminalId: session.terminalId }).catch(function () {});
-        session.terminalId = null;
-        stopPolling();
-        if (termRef.current) termRef.current.write('\r\n[会话已结束]\r\n');
-        setStatus('会话已结束 —— 点击任一终端按钮重新开启');
+      function refitActive() {
+        var tab = tabByKey(activeKey);
+        if (!tab || !tab.fit) return;
+        try {
+          tab.fit.fit();
+        } catch (e) {
+          /* 布局未就绪，ResizeObserver 会补 */
+        }
       }
-      // 登记到 apply 级：标签关闭（paneClosed）时由订阅者调用。
-      paneKill = killSession;
+      fitRef.current = refitActive;
 
+      function switchTab(key) {
+        if (key === activeKey) return;
+        activeKey = key;
+        showActive();
+        bump();
+      }
+      switchRef.current = switchTab;
 
-      // 面板只留「结束会话 + 状态」一行（shell/编码的选择归扩展设置 —— 面板
-      // 不再承担设置职责，2026-09-29）。
+      function showActive() {
+        var view = viewRef.current;
+        if (!view) return;
+        for (var i = 0; i < view.children.length; i++) {
+          view.children[i].style.display = 'none';
+        }
+        var tab = tabByKey(activeKey);
+        if (tab && tab.div) {
+          tab.div.style.display = 'block';
+          // 显示后一帧再 fit（display:none 期间尺寸为 0）
+          setTimeout(function () { refitActive(); }, 0);
+        }
+      }
+
+      function closeTab(key) {
+        var tab = tabByKey(key);
+        if (!tab) return;
+        if (tab.id) rpc('term.close', { terminalId: tab.id }).catch(function () {});
+        if (tab.term) tab.term.dispose();
+        if (tab.div && tab.div.parentNode) tab.div.parentNode.removeChild(tab.div);
+        tabs = tabs.filter(function (t) { return t !== tab; });
+        if (activeKey === key) {
+          activeKey = tabs.length ? tabs[tabs.length - 1].key : null;
+        }
+        if (!tabs.length) stopPolling();
+        else {
+          showActive();
+          armPolling();
+        }
+        bump();
+      }
+      closeRef.current = closeTab;
+
+      var tabBtns = [];
+      tabs.forEach(function (tab) {
+        var active = tab.key === activeKey;
+        tabBtns.push(h('span', {
+          key: tab.key,
+          style: { display: 'inline-flex', alignItems: 'center', gap: '2px' },
+        }, [
+          h(ctx.beui.Button, {
+            key: 't', size: 'sm',
+            variant: active ? 'primary' : 'ghost',
+            'data-locus-term-tab': tab.key,
+            onClick: function () { switchRef.current(tab.key); },
+          }, tab.name + (tab.exited ? '（已退出）' : '')),
+          h(ctx.beui.Button, {
+            key: 'x', size: 'sm', variant: 'ghost',
+            'data-locus-term-tab-close': tab.key,
+            onClick: function () { closeRef.current(tab.key); },
+          }, '×'),
+        ]));
+      });
+
       var toolbar = h('div', { 'data-locus-term-toolbar': '1', style: {
-        display: 'flex', gap: '6px', alignItems: 'center',
-        padding: '4px 6px',
-      } }, [
+        display: 'flex', gap: '4px', alignItems: 'center',
+        padding: '4px 6px', flexWrap: 'wrap',
+      } }, tabBtns.concat([
         h(ctx.beui.Button, {
-          key: 'kill', size: 'sm', variant: 'ghost', 'data-locus-term-kill': '1',
-          onClick: killSession,
-        }, '结束会话'),
-        h('span', { key: 'st', style: {
-          marginLeft: 'auto', fontSize: '12px', color: 'var(--fg-muted)',
-        }, 'data-locus-term-status': '1' }, status),
-      ]);
+          key: 'add', size: 'sm', variant: 'ghost', 'data-locus-term-add': '1',
+          disabled: tabs.length >= 4,
+          onClick: function () { newRef.current(); },
+        }, '＋'),
+      ]));
 
       return h('div', { style: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column' } }, [
         toolbar,
         h('div', {
-          ref: containerRef,
+          ref: viewRef,
           'data-locus-term-view': '1',
           style: {
             flex: '1 1 auto', minHeight: '0', padding: '6px',
             backgroundColor: 'var(--bg-base)', overflow: 'hidden',
+            position: 'relative',
           },
-        }),
+        }, tabs.length
+          ? null
+          : h('div', { key: 'empty', style: {
+              position: 'absolute', inset: 0, display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+            } }, h(ctx.beui.Button, {
+              key: 'new', size: 'sm', variant: 'primary',
+              'data-locus-term-new': '1',
+              onClick: function () { newRef.current(); },
+            }, '新建终端'))),
       ]);
+    }
+
+    // ---- 命令式会话管理（React 树之外，div 由这里直接挂）----------------------
+    var viewEl = null; // 挂载 effect 回填
+    var uiBumpRef = { current: function () {} };
+    var fitRef = { current: function () {} };
+    var switchRef = { current: function () {} };
+    var closeRef = { current: function () {} };
+    var newRef = { current: function () {} };
+
+    function tabByKey(key) {
+      for (var i = 0; i < tabs.length; i++) if (tabs[i].key === key) return tabs[i];
+      return null;
+    }
+    function nextName(profileName) {
+      var n = 1;
+      for (var i = 0; i < tabs.length; i++) {
+        if (tabs[i].baseName === profileName) n++;
+      }
+      return { base: profileName, label: n > 1 ? profileName + ' ' + n : profileName };
+    }
+
+    function newTerminal() {
+      newRefApply();
+    }
+    function newRefApply() {
+      var term = null, fit = null, div = null, tab = null;
+      Promise.all([
+        shellsCache
+          ? Promise.resolve(shellsCache)
+          : rpc('shells.list', {}).then(function (r) {
+              shellsCache = r.shells || [];
+              return { shells: shellsCache };
+            }).catch(function () { return { shells: [] }; }),
+        ctx.api.settings.get('default_shell').catch(function () { return 'auto'; }),
+        ctx.api.settings.get('utf8_mode').catch(function () { return 'auto'; }),
+      ])
+        .then(function (r) {
+          var utf8 = r[2] === 'native' ? 'native' : 'auto';
+          var want = r[1] && r[1] !== 'auto' ? r[1] : 'auto';
+          var pick = null;
+          if (want !== 'auto') {
+            pick = (r[0].shells || []).filter(function (s) { return s.id === want; })[0] || null;
+          }
+          return rpc('term.open', { shellId: pick ? pick.id : 'auto', utf8: utf8 });
+        })
+        .then(function (opened) {
+          // xterm 实例 + 专属 div（display:none 的兄弟，激活时切换）
+          term = new XTerm({
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace',
+            fontSize: 13,
+            lineHeight: 1.2,
+            cursorBlink: true,
+            theme: buildTermTheme(),
+          });
+          fit = new FitAddon();
+          term.loadAddon(fit);
+          div = document.createElement('div');
+          div.setAttribute('data-locus-term-session', opened.terminalId);
+          div.style.width = '100%';
+          div.style.height = '100%';
+          div.style.display = 'none';
+          term.open(div);
+          term.onData(function (data) {
+            queueWrite(opened.terminalId, data);
+          });
+          term.onResize(function (size) {
+            rpc('term.resize', { terminalId: opened.terminalId, cols: size.cols, rows: size.rows }).catch(function () {});
+          });
+          var named = nextName(opened.profile.name);
+          tab = {
+            key: 'k' + ++seq,
+            id: opened.terminalId,
+            baseName: named.base,
+            name: named.label,
+            exited: false,
+            term: term,
+            fit: fit,
+            div: div,
+          };
+          tabs.push(tab);
+          activeKey = tab.key;
+          if (viewEl) {
+            viewEl.appendChild(div);
+            div.style.display = 'block';
+          }
+          try {
+            fit.fit();
+          } catch (e) {
+            /* 布局未就绪，ResizeObserver 会补 */
+          }
+          armPolling();
+          uiBumpRef.current();
+        })
+        .catch(function (e) {
+          // 没有可用标签承载错误 —— 写进当前激活终端；连标签都没有时落在
+          // 视图容器的诊断属性上（面板为空态，用户至少能看到 ＋ 仍可重试）。
+          var cur = tabByKey(activeKey);
+          if (cur && cur.term) {
+            cur.term.write('\r\n[启动失败：' + ((e && e.message) || e) + ']\r\n');
+          } else if (viewEl) {
+            viewEl.setAttribute('data-locus-term-error', String((e && e.message) || e));
+          }
+        });
+    }
+    newRef.current = newRefApply;
+
+    function killAll() {
+      for (var i = 0; i < tabs.length; i++) {
+        var t = tabs[i];
+        if (t.id) rpc('term.close', { terminalId: t.id }).catch(function () {});
+        if (t.term) t.term.dispose();
+      }
+      tabs = [];
+      activeKey = null;
+      stopPolling();
+      uiBumpRef.current();
     }
 
     // ---- 设置卡片：默认终端 + 编码模式 ---------------------------------------
@@ -308,7 +431,10 @@ window.__OMP_PLUGIN__({
         setShellsErr('');
         rpc('shells.list', {})
           .then(function (r) {
-            if (alive) setShells(r.shells || []);
+            if (alive) {
+              setShells(r.shells || []);
+              shellsCache = r.shells || [];
+            }
           })
           .catch(function (e) {
             if (alive) {
@@ -396,7 +522,7 @@ window.__OMP_PLUGIN__({
 
     ctx.ui.registerPane('locus.terminal', TerminalPane, { fill: true });
     ctx.ui.registerSettingsCard(SettingsCard);
-    ctx.logger.info('终端插件已就绪');
+    ctx.logger.info('终端插件已就绪（多终端标签版）');
     return function () {
       // 插件撤销：runner 进程随之被杀，PTY 会话自动终结；这里只清本地轮询。
       stopPolling();

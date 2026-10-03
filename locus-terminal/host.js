@@ -116,7 +116,9 @@ function buildProfiles() {
       name: 'Windows PowerShell',
       exe: psExe,
       kind: 'ps',
-      utf8Args: ['-NoLogo', '-NoExit', '-Command', 'chcp 65001 >nul'],
+      // PowerShell 里 `>nul` 会被解析成 Out-File 到设备 nul —— 部分系统直接
+      // OpenError 红屏（每次开会话第一屏就是它）。静默改写用 Out-Null。
+      utf8Args: ['-NoLogo', '-NoExit', '-Command', 'chcp 65001 | Out-Null'],
       nativeArgs: ['-NoLogo'],
     });
   }
