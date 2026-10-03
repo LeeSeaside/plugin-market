@@ -100,6 +100,10 @@ window.__OMP_PLUGIN__({
       rpc('term.read', { terminalId: tab.id })
         .then(function (resp) {
           if (resp.data && tab.term) tab.term.write(resp.data);
+          if (resp.data && !tab.started) {
+            tab.started = true;
+            uiBumpRef.current();
+          }
           if (resp.exited) {
             tab.exited = true;
             tab.id = null; // PTY 已终结：标签保留（缓冲可看），可「＋」或点原标签切换
@@ -158,7 +162,10 @@ window.__OMP_PLUGIN__({
 
       var s6 = R.useState('⠋'), spinFrame = s6[0], setSpinFrame = s6[1];
       R.useEffect(function () {
-        if (!pendingNew) return undefined;
+        var activeNow = tabByKey(activeKey);
+        var busy = pendingNew > 0
+          || (!!activeNow && !activeNow.started && !activeNow.exited);
+        if (!busy) return undefined;
         var frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         var i = 0;
         var timer = setInterval(function () {
@@ -307,6 +314,20 @@ window.__OMP_PLUGIN__({
         }, pendingNew > 0 ? spinFrame : '＋'),
       ]));
 
+      var activeTab = tabByKey(activeKey);
+      var startOverlay = activeTab && !activeTab.started && !activeTab.exited
+        ? h('div', {
+            key: 'starting',
+            'data-locus-term-starting-overlay': '1',
+            style: {
+              position: 'absolute', inset: 0, display: 'flex',
+              alignItems: 'center', justifyContent: 'center', gap: '8px',
+              backgroundColor: 'var(--bg-base)', color: 'var(--fg-primary)',
+              pointerEvents: 'none',
+            },
+          }, spinFrame + ' 正在启动 ' + activeTab.name + ' …')
+        : null;
+
       return h('div', { style: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column' } }, [
         toolbar,
         h('div', {
@@ -317,26 +338,29 @@ window.__OMP_PLUGIN__({
             backgroundColor: 'var(--bg-base)', overflow: 'hidden',
             position: 'relative',
           },
-        }, tabs.length
-          ? null
-          : h('div', { key: 'empty', style: {
-              position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-              gap: '8px', alignItems: 'center', justifyContent: 'center',
-            } }, [
-              pendingNew > 0
-                ? h('div', { key: 'loading', 'data-locus-term-starting': '1' }, spinFrame + ' 正在启动终端…')
-                : null,
-              lastNewError
-                ? h('div', { key: 'err', style: { color: 'var(--warn)' } }, '启动失败：' + lastNewError)
-                : null,
-              pendingNew > 0
-                ? null
-                : h(ctx.beui.Button, {
-                    key: 'new', size: 'sm', variant: 'primary',
-                    'data-locus-term-new': '1',
-                    onClick: function () { newRef.current(); },
-                  }, '新建终端'),
-            ])),
+        }, [
+          tabs.length
+            ? null
+            : h('div', { key: 'empty', style: {
+                position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+                gap: '8px', alignItems: 'center', justifyContent: 'center',
+              } }, [
+                pendingNew > 0
+                  ? h('div', { key: 'loading', 'data-locus-term-starting': '1' }, spinFrame + ' 正在启动终端…')
+                  : null,
+                lastNewError
+                  ? h('div', { key: 'err', style: { color: 'var(--warn)' } }, '启动失败：' + lastNewError)
+                  : null,
+                pendingNew > 0
+                  ? null
+                  : h(ctx.beui.Button, {
+                      key: 'new', size: 'sm', variant: 'primary',
+                      'data-locus-term-new': '1',
+                      onClick: function () { newRef.current(); },
+                    }, '新建终端'),
+              ]),
+          startOverlay,
+        ]),
       ]);
     }
 
@@ -420,6 +444,7 @@ window.__OMP_PLUGIN__({
             baseName: named.base,
             name: named.label,
             exited: false,
+            started: false,
             term: term,
             fit: fit,
             div: div,
