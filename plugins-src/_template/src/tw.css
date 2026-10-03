@@ -1,19 +1,8 @@
-/*
- * Tailwind v4 入口（编译期被 @tailwindcss/cli 处理成产物 CSS，再由
- * esbuild 以文本内联进 client.js、apply 时注入 <style>）。
- *
- * ⚠️ 故意不引入 preflight：它是全局 reset，会重置宿主元素样式。
- * 只带 theme（断点/变量）与 utilities（插件子树里的类名）。
- */
 @import "tailwindcss/theme.css" layer(theme);
 
 @layer theme {
-  /* preflight 补偿（只作用于插件子树）：不引入 preflight 是为了不重置宿主
-     元素，但代价是 button 保留 UA 默认样式 —— 无 color-scheme 的页面里
-     白 ButtonFace 底会从没写 bg 类的按钮上透出来。放在 theme layer
-     （先于 utilities）：utilities 的 bg、px、text 类正常覆盖。
-     警告：别写成 @layer utilities 包裹 —— lightningcss 会编译成
-     非法的「layer 名后跟选择器」形态，浏览器整条丢弃。 */
+  /* scoped 复位：宿主 omp.css 全局 `* reset` 在时大多冗余，无宿主环境时
+     它承担全部复位（button ButtonFace 底 / p,h 的 UA margin）。 */
   :where([data-omp-tw] button) {
     background-color: transparent;
     border-color: transparent;
@@ -21,8 +10,28 @@
     font: inherit;
     color: inherit;
   }
+  :where([data-omp-tw] p, [data-omp-tw] h1, [data-omp-tw] h2, [data-omp-tw] h3) {
+    margin: 0;
+  }
 }
 
-@import "tailwindcss/utilities.css" layer(utilities);
+/* ⚠️ utilities 绝不能进 @layer：宿主 omp.css 顶部有一条无 layer 的
+   `* { box-sizing: border-box; margin: 0; padding: 0 }`（宿主组件全用
+   显式 padding，敢全局归零），而 CSS 里无 layer 规则永远压过任何 layer
+   规则 —— layer 里的 padding 类（p-4/px-3/py-0.5 …）在真机全数失效，
+   卡片内容顶到圆角上被吞字。unlayered 后按特异性竞争：.p-4 (0,1,0) >
+   * (0,0,0)，插件赢回；宿主哈希类选择器不会命中插件子树，零误伤。 */
+@import "tailwindcss/utilities.css";
 
 @source "./";
+
+/* recharts v3 accessibilityLayer 把 tabIndex=0 挂在 svg.recharts-surface
+   （RootSurface → Surface；wrapper 本身没有 tabindex）——图表聚焦会画出
+   UA 默认焦点环（颜色跟随 Windows 系统强调色）。wrapper 与全部后代一起
+   关掉：图表不是表单控件，焦点环无交互意义。用别的图表库可删。 */
+[data-omp-tw] .recharts-wrapper:focus,
+[data-omp-tw] .recharts-wrapper:focus-visible,
+[data-omp-tw] .recharts-wrapper :focus,
+[data-omp-tw] .recharts-wrapper :focus-visible {
+  outline: none;
+}

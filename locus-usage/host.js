@@ -16,9 +16,11 @@
  *   params.ompExe      bundled 内核 exe（懒解析，未 staged 为 null）
  *
  * 方法面：
- *   usage.summary { days? }  → { total, daily[], providers[], tokens[] }
- *   usage.models             → [{ modelKey, samples, tps, ttftS, updatedAt }]
- *   usage.quota              → [{ limitId, label, usedFraction, status, resetsAt }]
+ *   usage.summary { days?, all?, provider?, model? }
+ *        → { unit: 'day'|'hour', total(含 cacheRate/tps/ttftS/errors/cacheSavings),
+ *            daily[](含 errors), providers[], models[](含 tps/ttftS), facets }
+ *   usage.models { all?, provider?, model? } → [{ modelKey, samples, tps, ttftS, updatedAt }]
+ *   usage.quota                              → [{ limitId, label, usedFraction, status, resetsAt }]
  */
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -132,39 +134,122 @@ const msToLocalDay = (ms) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
+/**
+ * 1.4.0 过滤面：all=true 不限窗；days<=1 走逐小时桶；provider/model 为精确
+ * 匹配（空串忽略）。同一 WHERE 供 buckets / 聚合 / providers / models 四路
+ * 查询共用，保证各卡口径一致。
+ */
+function buildWhere(params) {
+  const where = [];
+  const args = [];
+  const all = params.all === true;
+  const days = all ? 0 : Math.min(Math.max(Number(params.days) || DEFAULT_DAYS, 1), MAX_DAYS);
+  if (!all) {
+    where.push('timestamp >= ?');
+    args.push(Date.now() - days * 86_400_000);
+  }
+  if (typeof params.provider === 'string' && params.provider) {
+    where.push('provider = ?');
+    args.push(params.provider);
+  }
+  if (typeof params.model === 'string' && params.model) {
+    where.push('model = ?');
+    args.push(params.model);
+  }
+  return {
+    clause: where.length ? 'WHERE ' + where.join(' AND ') : '',
+    args,
+    all,
+    days,
+  };
+}
+
 function summaryRequest(params) {
-  const days = Math.min(Math.max(Number(params.days) || DEFAULT_DAYS, 1), MAX_DAYS);
-  const sinceMs = Date.now() - days * 86_400_000;
   const db = openStatsDb(params.kernelHome);
+  const { clause, args, all, days } = buildWhere(params);
+  const hourly = !all && days <= 1;
+  const bucket = hourly
+    ? `strftime('%Y-%m-%d %H:00', timestamp/1000, 'unixepoch', 'localtime')`
+    : `date(timestamp/1000, 'unixepoch', 'localtime')`;
   const daily = db
     .prepare(
-      `SELECT date(timestamp/1000, 'unixepoch', 'localtime') AS day,
+      `SELECT ${bucket} AS day,
               COUNT(*) AS n, SUM(cost_total) AS cost,
               SUM(input_tokens) AS input, SUM(output_tokens) AS output,
-              SUM(cache_read_tokens) AS cacheRead, SUM(cache_write_tokens) AS cacheWrite
-         FROM messages WHERE timestamp >= ?
+              SUM(cache_read_tokens) AS cacheRead, SUM(cache_write_tokens) AS cacheWrite,
+              SUM(CASE WHEN error_message IS NOT NULL AND error_message <> '' THEN 1 ELSE 0 END) AS errors
+         FROM messages ${clause}
         GROUP BY day ORDER BY day`,
     )
-    .all(sinceMs);
+    .all(...args);
   const totalRow = db
     .prepare(
       `SELECT COUNT(*) AS n, SUM(cost_total) AS cost,
-              MIN(timestamp) AS first_at, MAX(timestamp) AS last_at
-         FROM messages`,
+              MIN(timestamp) AS first_at, MAX(timestamp) AS last_at,
+              SUM(input_tokens) AS input, SUM(cache_read_tokens) AS cacheRead,
+              SUM(cost_no_cache_input) AS costNoCache, SUM(cost_input) AS costIn,
+              SUM(cost_cache_read) AS costCRead,
+              SUM(CASE WHEN error_message IS NOT NULL AND error_message <> '' THEN 1 ELSE 0 END) AS errors,
+              SUM(duration) AS genMs,
+              SUM(CASE WHEN duration > 0 THEN output_tokens ELSE 0 END) AS genOut,
+              SUM(CASE WHEN ttft > 0 THEN ttft ELSE 0 END) AS ttftMs,
+              SUM(CASE WHEN ttft > 0 THEN 1 ELSE 0 END) AS ttftN
+         FROM messages ${clause}`,
     )
-    .get();
+    .get(...args);
   const providers = db
     .prepare(
       `SELECT provider, COUNT(*) AS n, SUM(cost_total) AS cost
-         FROM messages GROUP BY provider ORDER BY cost DESC`,
+         FROM messages ${clause} GROUP BY provider ORDER BY cost DESC`,
     )
-    .all();
+    .all(...args);
+  const modelClause = clause ? clause + ' AND model IS NOT NULL' : 'WHERE model IS NOT NULL';
+  const models = db
+    .prepare(
+      `SELECT model, COUNT(*) AS n, SUM(cost_total) AS cost,
+              SUM(duration) AS genMs,
+              SUM(CASE WHEN duration > 0 THEN output_tokens ELSE 0 END) AS genOut,
+              AVG(CASE WHEN ttft > 0 THEN ttft END) AS ttftMs
+         FROM messages ${modelClause}
+        GROUP BY model ORDER BY n DESC LIMIT 40`,
+    )
+    .all(...args);
+  // facets 不过滤（供下拉选项），models/providers 过滤（供卡片口径一致）
+  const facets = {
+    providers: db
+      .prepare(`SELECT DISTINCT provider FROM messages WHERE provider IS NOT NULL AND provider <> '' ORDER BY provider`)
+      .all()
+      .map((r) => r.provider),
+    models: db
+      .prepare(`SELECT DISTINCT model FROM messages WHERE model IS NOT NULL AND model <> '' ORDER BY model LIMIT 60`)
+      .all()
+      .map((r) => r.model),
+  };
+  const n = Number(totalRow?.n ?? 0);
+  const input = Number(totalRow?.input ?? 0);
+  const cacheRead = Number(totalRow?.cacheRead ?? 0);
+  const genMs = Number(totalRow?.genMs ?? 0);
+  const genOut = Number(totalRow?.genOut ?? 0);
+  const ttftMs = Number(totalRow?.ttftMs ?? 0);
+  const ttftN = Number(totalRow?.ttftN ?? 0);
+  const costNoCache = totalRow?.costNoCache == null ? null : Number(totalRow.costNoCache);
+  const cacheSavings =
+    costNoCache == null
+      ? null
+      : Math.max(0, costNoCache - (Number(totalRow?.costIn ?? 0) + Number(totalRow?.costCRead ?? 0)));
   return {
+    unit: hourly ? 'hour' : 'day',
     total: {
-      count: Number(totalRow?.n ?? 0),
+      count: n,
       cost: Number(totalRow?.cost ?? 0),
       firstDay: totalRow?.first_at ? msToLocalDay(totalRow.first_at) : null,
       lastDay: totalRow?.last_at ? msToLocalDay(totalRow.last_at) : null,
+      errors: Number(totalRow?.errors ?? 0),
+      // 口径与 omp stats --json overall.cacheRate 一致：read / (input + read)
+      cacheRate: input + cacheRead > 0 ? cacheRead / (input + cacheRead) : null,
+      cacheSavings,
+      tps: genMs > 0 ? (genOut / genMs) * 1000 : null,
+      ttftS: ttftN > 0 ? ttftMs / ttftN / 1000 : null,
     },
     daily: daily.map((r) => ({
       day: r.day,
@@ -174,8 +259,17 @@ function summaryRequest(params) {
       output: Number(r.output ?? 0),
       cacheRead: Number(r.cacheRead ?? 0),
       cacheWrite: Number(r.cacheWrite ?? 0),
+      errors: Number(r.errors ?? 0),
     })),
     providers: providers.map((r) => ({ provider: r.provider, count: Number(r.n), cost: Number(r.cost ?? 0) })),
+    models: models.map((r) => ({
+      modelKey: r.model,
+      samples: Number(r.n ?? 0),
+      cost: Number(r.cost ?? 0),
+      tps: Number(r.genMs) > 0 ? (Number(r.genOut ?? 0) / Number(r.genMs)) * 1000 : null,
+      ttftS: Number(r.ttftMs) > 0 ? Number(r.ttftMs) / 1000 : null,
+    })),
+    facets,
     // token 流水现与 daily 同源同窗（stats.db 全量记账），不再有「待上报」态。
     tokens: daily.map((r) => ({
       day: r.day,
@@ -191,14 +285,17 @@ function modelsRequest(params) {
   const db = openStatsDb(params.kernelHome);
   // duration / ttft 单位毫秒（与 /stats 面板 avgTtft 同源）；tps 与 TTFT 均
   // 按聚合比值（累计和相除即均值），样本数 = 该模型 assistant 消息数。
+  // 1.4.0：吃与 summary 同一套 provider/model 过滤（days 由调用方给 all）。
+  const { clause, args } = buildWhere(params);
+  const modelClause = clause ? clause + ' AND model IS NOT NULL' : 'WHERE model IS NOT NULL';
   const rows = db
     .prepare(
       `SELECT model, COUNT(*) AS n, SUM(output_tokens) AS output,
               SUM(duration) AS genMs, AVG(ttft) AS ttftMs, MAX(timestamp) AS updated
-         FROM messages WHERE model IS NOT NULL
+         FROM messages ${modelClause}
         GROUP BY model ORDER BY n DESC LIMIT 30`,
     )
-    .all();
+    .all(...args);
   return rows.map((r) => ({
     modelKey: r.model,
     samples: Number(r.n ?? 0),
