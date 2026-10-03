@@ -338,7 +338,7 @@ window.__OMP_PLUGIN__({
       var term = null, fit = null, div = null, tab = null;
       Promise.all([
         shellsCache
-          ? Promise.resolve(shellsCache)
+          ? Promise.resolve({ shells: shellsCache })
           : rpc('shells.list', {}).then(function (r) {
               shellsCache = r.shells || [];
               return { shells: shellsCache };
@@ -350,8 +350,9 @@ window.__OMP_PLUGIN__({
           var utf8 = r[2] === 'native' ? 'native' : 'auto';
           var want = r[1] && r[1] !== 'auto' ? r[1] : 'auto';
           var pick = null;
+          var shells = (r[0] && r[0].shells) || [];
           if (want !== 'auto') {
-            pick = (r[0].shells || []).filter(function (s) { return s.id === want; })[0] || null;
+            pick = shells.filter(function (s) { return s.id === want; })[0] || null;
           }
           return rpc('term.open', { shellId: pick ? pick.id : 'auto', utf8: utf8 });
         })

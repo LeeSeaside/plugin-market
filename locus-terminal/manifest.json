@@ -1,7 +1,7 @@
 {
   "id": "com.locus.terminal",
   "name": "终端",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "apiVersion": 1,
   "description": "交互式终端面板：自动识别系统可用 shell（PowerShell / pwsh / CMD / Git Bash / WSL 发行版），支持选择默认终端与编码模式（强制 UTF-8 / 原生），宿主 PTY 会话跨面板切换存活。Host 半经宿主 PTY（@lydell/node-pty）spawn 真实终端进程。",
   "entry": {
