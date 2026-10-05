@@ -157,6 +157,21 @@ function git(args, opts = {}) {
   });
 }
 
+/** 网络类操作（push/pull）超时被杀时的可行动指引。1.1.1 文案级缓解：本轮
+ * 不做 TTY 交互，卡死的常见原因（交互式凭据提示 / 大仓库）只能靠提示用户
+ * 去系统终端手动确认。仅对 gitKilled（超时终止）附加，正常失败不掺水。 */
+function withNetTimeoutHint(err, op) {
+  if (err && err.gitKilled === true) {
+    const hint =
+      `git ${op} 超时（${NET_TIMEOUT_MS / 1000}s）被终止 —— 交互式凭据输入提示或大仓库都可能卡住。` +
+      `若持续失败，请在系统终端手动执行确认凭据状态。`;
+    const raw =
+      err.message && err.message !== `git ${op} 失败` ? '\n' + err.message : '';
+    err.message = hint + raw;
+  }
+  return err;
+}
+
 /** porcelain v1 -b 解析。untracked（??）归入未暂存域。 */
 function parseStatus(text) {
   const lines = text.split('\n');
@@ -395,15 +410,23 @@ export async function activate(host) {
           return { ok: true, output: output.trim() };
         }
         case 'git.push': {
-          const output = await git(['push'], { cwd: params.workspace, timeoutMs: NET_TIMEOUT_MS });
-          return { ok: true, output: output.trim() };
+          try {
+            const output = await git(['push'], { cwd: params.workspace, timeoutMs: NET_TIMEOUT_MS });
+            return { ok: true, output: output.trim() };
+          } catch (err) {
+            throw withNetTimeoutHint(err, 'push');
+          }
         }
         case 'git.pull': {
-          const output = await git(['pull', '--ff-only'], {
-            cwd: params.workspace,
-            timeoutMs: NET_TIMEOUT_MS,
-          });
-          return { ok: true, output: output.trim() };
+          try {
+            const output = await git(['pull', '--ff-only'], {
+              cwd: params.workspace,
+              timeoutMs: NET_TIMEOUT_MS,
+            });
+            return { ok: true, output: output.trim() };
+          } catch (err) {
+            throw withNetTimeoutHint(err, 'pull');
+          }
         }
         case 'git.branches': {
           const text = await git(['branch', '--list', '--format=%(refname:short)%00%(HEAD)'], {

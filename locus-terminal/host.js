@@ -9,6 +9,9 @@
  * 方法（经 omp:plugin-host:invoke 桥，params 自带服务端注入的 workspace）：
  *   shells.list            → { shells: [{id,name,exe,args,kind,available}], notes? }
  *   term.open  {shellId,cwd,utf8} → { terminalId, profile }
+ *       （1.4.8 起 cwd 解析：params.cwd 优先 → params.workspace（invoke 桥自动
+ *         附加的活动工作区）→ 用户主目录兜底；此前从不看 workspace，终端
+ *         永远落在主目录。）
  *   term.read  {terminalId}       → { data, exited, exitCode }   取走增量缓冲
  *   term.attach{terminalId}       → { replay, exited, exitCode } 面板重挂载回放
  *   term.write {terminalId,data}  → {}
@@ -54,6 +57,15 @@ function exists(p) {
   }
 }
 
+/** 目录存在性（cwd / workspace 都是目录 —— exists() 是 isFile 判定，不能复用）。 */
+function dirExists(p) {
+  try {
+    return !!p && fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** 同步探测单个可执行文件（PATH + 固定位置）。 */
 function findExe(candidates) {
   for (const p of candidates) {
@@ -63,9 +75,12 @@ function findExe(candidates) {
 }
 
 function regQueryGitPath() {
+  // reg.exe 用绝对路径调（locus-git 同款修法）—— 宿主进程链 PATH 常常不完整，
+  // 裸名 'reg.exe' 在那种环境下必 ENOENT，注册表探测就永远失效。
+  const regExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe');
   try {
     const out = execFileSync(
-      'reg.exe',
+      regExe,
       ['query', 'HKLM\\SOFTWARE\\GitForWindows', '/v', 'InstallPath'],
       { encoding: 'utf8', timeout: TERM_TIMEOUT_MS, windowsHide: true },
     );
@@ -152,8 +167,19 @@ function buildProfiles() {
   }
 
   // ---- Git Bash ----
-  const gitRoot = regQueryGitPath() || path.join(pf, 'Git');
-  const bashExe = findExe([path.join(gitRoot, 'bin', 'bash.exe'), path.join(gitRoot, 'usr', 'bin', 'bash.exe')]);
+  // Git 根候选按可靠性排序（1.4.8 加固）：注册表（reg.exe 已绝对路径化）→
+  // Program Files → LOCALAPPDATA 用户级安装，逐个根找 bash.exe。
+  const lac = process.env.LOCALAPPDATA;
+  const gitRoots = [];
+  const regRoot = regQueryGitPath();
+  if (regRoot) gitRoots.push(regRoot);
+  gitRoots.push(path.join(pf, 'Git'));
+  if (lac) gitRoots.push(path.join(lac, 'Programs', 'Git'));
+  let bashExe = null;
+  for (const root of gitRoots) {
+    bashExe = findExe([path.join(root, 'bin', 'bash.exe'), path.join(root, 'usr', 'bin', 'bash.exe')]);
+    if (bashExe) break;
+  }
   if (bashExe) {
     profiles.push({
       id: 'gitbash',
@@ -193,7 +219,11 @@ function getProfiles() {
 
 function getSession(id) {
   const s = sessions.get(id);
-  if (!s) throw new Error(`终端会话不存在（可能已随插件重启清空）：${id}`);
+  if (!s) {
+    // 1.4.8：补一句可行动指引 —— 面板重挂后旧 terminalId 失效是正常路径，
+    // 用户需要知道下一步点什么。
+    throw new Error(`终端会话不存在（可能已随插件重启清空）：${id} —— 可点工具栏「＋」新建终端`);
+  }
   return s;
 }
 
@@ -211,6 +241,21 @@ function closeSession(id) {
 export function activate(host) {
   const pty = loadPty(host);
   host.log('info', 'terminal host ready');
+
+  // 1.4.8：持有存活 PTY 会话期间向 broker 续约 —— 契约 `host.keepAlive(): void`
+  // （后端 broker 侧并行开发中）。60s 心跳；无会话时不发。try/catch 包住：
+  // 旧 runner 没有 keepAlive 方法（TypeError）或调用失败都静默忽略，行为
+  // 退化为现状，不做版本探测。
+  const keepAliveTimer = setInterval(() => {
+    if (sessions.size > 0) {
+      try {
+        host.keepAlive();
+      } catch {
+        /* 旧 runner 无 host.keepAlive —— 静默忽略 */
+      }
+    }
+  }, 60_000);
+  keepAliveTimer.unref?.(); // 不阻塞插件进程退出
 
   return {
     async request(method, params = {}) {
@@ -239,7 +284,15 @@ export function activate(host) {
             const oldest = sessions.keys().next().value;
             closeSession(oldest);
           }
-          const cwd = exists(params.cwd) ? params.cwd : process.env.USERPROFILE || 'C:\\';
+          // 1.4.8：cwd 解析 —— 显式 params.cwd 优先；否则用服务端注入的
+          // params.workspace（invoke 桥对 omp:plugin-host:invoke 自动附加活动
+          // 工作区，客户端 API 本身无 workspace getter）；最后兜底用户主目录。
+          // 此前从不看 workspace，终端永远落在主目录。
+          const cwd =
+            (dirExists(params.cwd) && params.cwd) ||
+            (dirExists(params.workspace) && params.workspace) ||
+            process.env.USERPROFILE ||
+            'C:\\';
           const terminalId = `t${++seq}`;
           const args = utf8 ? profile.utf8Args : profile.nativeArgs;
           const ptySession = pty.spawn(profile.exe, args, {

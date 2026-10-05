@@ -350,6 +350,9 @@ window.__OMP_PLUGIN__({
       var br = R.useState([]), branches = br[0], setBranches = br[1];
       var sh = R.useState([]), stashList = sh[0], setStashList = sh[1];
       var bs = R.useState(false), busy = bs[0], setBusy = bs[1];
+      // 1.1.1：push/pull 期间的可见反馈 —— busy 只把按钮禁掉，长操作（最长
+      // 90s）像卡死。netBusy 仅网络类操作置位，busyBar 显示耗时预期与指引。
+      var ns = R.useState(false), netBusy = ns[0], setNetBusy = ns[1];
       var busyRef = R.useRef(false);
       var er = R.useState(null), err = er[0], setErr = er[1];
       var ms = R.useState(''), msg = ms[0], setMsg = ms[1];
@@ -431,7 +434,8 @@ window.__OMP_PLUGIN__({
 
       function act(promise, done) {
         setBusyBoth(true);
-        promise
+        // 返回整条链（1.1.1）：runNet 需要在其结束后清 netBusy。
+        return promise
           .then(function () {
             setErr(null);
             return refreshAll().then(function () {
@@ -446,6 +450,14 @@ window.__OMP_PLUGIN__({
           .finally(function () {
             setBusyBoth(false);
           });
+      }
+
+      /** push/pull 专用：act 外再挂 netBusy（凭据/大仓库提示条，见 busyBar）。 */
+      function runNet(mkPromise) {
+        setNetBusy(true);
+        return Promise.resolve(act(mkPromise())).finally(function () {
+          setNetBusy(false);
+        });
       }
 
       function showDiff(f) {
@@ -505,8 +517,8 @@ window.__OMP_PLUGIN__({
         rowBtn('⟳', '刷新', refreshAll, busy),
         rowBtn('stash', '贮藏全部变更（含未跟踪）', function () { act(rpc('git.stash', {})); }, busy || files.length === 0),
         rowBtn('pop', '弹出最近一次贮藏', function () { act(rpc('git.stashPop')); }, busy || stashList.length === 0),
-        rowBtn('pull', '拉取（--ff-only）', function () { act(rpc('git.pull')); }, busy),
-        rowBtn('push', '推送到远端', function () { act(rpc('git.push')); }, busy),
+        rowBtn('pull', '拉取（--ff-only）', function () { runNet(function () { return rpc('git.pull'); }); }, busy),
+        rowBtn('push', '推送到远端', function () { runNet(function () { return rpc('git.push'); }); }, busy),
       ]);
 
       var newBranchBar = newBranchOpen
@@ -536,6 +548,22 @@ window.__OMP_PLUGIN__({
               act(rpc('git.branchCreate', { name: newBranchName.trim() }));
             }, busy || !newBranchName.trim()),
           ])
+        : null;
+
+      // 1.1.1：push/pull 期间的耗时预期提示（文案级缓解，host 侧超时错误
+      // 另带「去系统终端确认凭据」指引）。样式沿用 errBar 同族提示条。
+      var busyBar = busy && netBusy
+        ? h(
+            'div',
+            {
+              style: {
+                margin: '4px 2px', padding: '6px 8px', borderRadius: '6px',
+                fontSize: '12px', color: 'var(--fg-secondary)',
+                backgroundColor: 'var(--border-strong)',
+              },
+            },
+            '执行中（如遇凭据输入提示或大仓库，可能耗时较长）',
+          )
         : null;
 
       var errBar = err
@@ -641,6 +669,7 @@ window.__OMP_PLUGIN__({
       return h('div', { 'data-plugin-pane': c.id, style: { padding: '4px 2px' } }, [
         head,
         newBranchBar,
+        busyBar,
         errBar,
         diffView,
         fileSection('未暂存', unstagedFiles, '工作区干净'),
@@ -675,6 +704,6 @@ window.__OMP_PLUGIN__({
     }
 
     ctx.ui.registerPane('locus.git', GitPane);
-    ctx.logger.info('内置 Git 工作台面板已就绪（v1.1.0：图车道/diff 染色/分支/stash/监听刷新）');
+    ctx.logger.info('内置 Git 工作台面板已就绪（v1.1.1：push/pull busy 提示与超时指引）');
   },
 });

@@ -13,6 +13,9 @@
  * 终端渲染用宿主共享的 ctx.xterm（与 ctx.React 同理：自带一份会双实例）。
  * 主题：xterm 是 canvas，吃不到 CSS 变量 —— 喂实际色值并监听主题切换重喂
  * （与宿主内置 tool:terminal 同一套口径）。
+ *
+ * 1.4.8：新建终端失败改为 toast（ctx.ui.notify）+ 保留面板内痕迹；open 请求
+ * 由 invoke 桥自动附带 workspace（终端落工作区而非主目录，见 host 半）。
  */
 window.__OMP_PLUGIN__({
   apply: function (ctx) {
@@ -471,15 +474,24 @@ window.__OMP_PLUGIN__({
           uiBumpRef.current();
         })
         .catch(function (e) {
+          var msg = String((e && e.message) || e);
+          // 1.4.8 错误可见性：失败至少走一次 toast（选型 = ctx.ui.notify，
+          // manifest 已补 ui:notify 权限）—— 覆盖「已有标签」「空态」两种场景，
+          // 旧的标签内写入 / data-locus-term-error 诊断属性保留为面板内痕迹。
+          try {
+            ctx.ui.notify('终端启动失败：' + msg);
+          } catch (notifyErr) {
+            /* 权限缺失或宿主过旧 —— 降级为仅面板内提示 */
+          }
           // 没有可用标签承载错误 —— 写进当前激活终端；连标签都没有时落在
           // 视图容器的诊断属性上（面板为空态，用户至少能看到 ＋ 仍可重试）。
           var cur = tabByKey(activeKey);
           if (cur && cur.term) {
-            cur.term.write('\r\n[启动失败：' + ((e && e.message) || e) + ']\r\n');
+            cur.term.write('\r\n[启动失败：' + msg + ']\r\n');
           } else if (viewEl) {
-            viewEl.setAttribute('data-locus-term-error', String((e && e.message) || e));
+            viewEl.setAttribute('data-locus-term-error', msg);
           }
-          lastNewError = String((e && e.message) || e);
+          lastNewError = msg;
           pendingNew = Math.max(0, pendingNew - 1);
           uiBumpRef.current();
         });

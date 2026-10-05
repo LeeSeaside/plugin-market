@@ -40802,6 +40802,11 @@
     const [quota, setQuota] = useState([]);
     const [err, setErr] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [sync, setSync] = useState({
+      state: "ok",
+      reason: null
+    });
+    const [syncHidden, setSyncHidden] = useState(false);
     const [days, setDays] = useState(90);
     const [provider, setProvider] = useState("");
     const [model, setModel] = useState("");
@@ -40831,7 +40836,10 @@
           rpc("usage.models", { all: true, provider: p, model: m2 }),
           rpc("usage.quota")
         ]).then((r2) => {
-          setSum(r2[0]);
+          const s0 = r2[0];
+          setSum(s0);
+          setSync({ state: s0?.syncState ?? "ok", reason: s0?.syncReason ?? null });
+          setSyncHidden(false);
           setSum90(r2[1]);
           setModels(Array.isArray(r2[2]) ? r2[2] : []);
           setQuota(Array.isArray(r2[3]) ? r2[3] : []);
@@ -40924,6 +40932,14 @@
         ref: rootRef,
         className: "flex flex-col gap-2.5 p-2.5 pb-5 sm:p-3",
         children: [
+          sync.state === "unavailable" && !syncHidden && /* @__PURE__ */ jsx(
+            "div",
+            {
+              onClick: () => setSyncHidden(true),
+              className: "mx-0.5 mb-1 cursor-pointer whitespace-pre-wrap break-words rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-panel)] p-2 px-3 text-xs text-[var(--fg-secondary)]",
+              children: "\u6570\u636E\u53EF\u80FD\u8FC7\u671F \xB7 \u70B9\u51FB\u5173\u95ED\n\u589E\u91CF\u540C\u6B65\u4E0D\u53EF\u7528\uFF1A" + (sync.reason ?? "\u539F\u56E0\u672A\u77E5") + "\u3002\u4EE5\u4E0B\u4E3A\u4E0A\u6B21\u540C\u6B65\u7684\u5FEB\u7167\u6570\u636E\u3002"
+            }
+          ),
           /* @__PURE__ */ jsxs("div", { className: "flex flex-wrap items-center gap-2.5 px-0.5 pb-1.5", children: [
             /* @__PURE__ */ jsxs("div", { className: "min-w-[150px] flex-1", children: [
               /* @__PURE__ */ jsx("div", { className: "text-sm font-semibold text-[var(--fg-primary)]", children: "\u7528\u91CF\u7EDF\u8BA1" }),

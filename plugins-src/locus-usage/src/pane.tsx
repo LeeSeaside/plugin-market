@@ -46,6 +46,9 @@ interface Summary {
   providers: { provider: string; count: number; cost: number }[];
   models: { modelKey: string; samples: number; tps: number | null; ttftS: number | null }[];
   facets: { providers: string[]; models: string[] };
+  /** 1.5.0：面板加载那次增量同步的结论（host 附带；models 数组不带）。 */
+  syncState?: 'ok' | 'unavailable';
+  syncReason?: string | null;
 }
 interface ModelRow {
   modelKey: string;
@@ -181,6 +184,13 @@ export function UsagePane(props: { ctx: LocusPluginCtx }) {
   const [quota, setQuota] = useState<QuotaRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 1.5.0：同步不可用提示条（bundled exe 缺失 / PATH 无 omp / 内核过旧 …）——
+  // 此前失败静默，面板对着旧快照毫无标识。syncHidden = 用户点击关闭。
+  const [sync, setSync] = useState<{ state: 'ok' | 'unavailable'; reason: string | null }>({
+    state: 'ok',
+    reason: null,
+  });
+  const [syncHidden, setSyncHidden] = useState(false);
   const [days, setDays] = useState(90);
   // 1.4.0 维度过滤：provider/model 精确匹配（'' = 不过滤）。ref 供 load 闭包
   // 读到最新值，避免重建回调把 IntersectionObserver 断了重挂。
@@ -225,7 +235,10 @@ export function UsagePane(props: { ctx: LocusPluginCtx }) {
         rpc('usage.quota'),
       ])
         .then((r) => {
-          setSum(r[0] as Summary);
+          const s0 = r[0] as Summary;
+          setSum(s0);
+          setSync({ state: s0?.syncState ?? 'ok', reason: s0?.syncReason ?? null });
+          setSyncHidden(false);
           setSum90(r[1] as Summary);
           setModels(Array.isArray(r[2]) ? (r[2] as ModelRow[]) : []);
           setQuota(Array.isArray(r[3]) ? (r[3] as QuotaRow[]) : []);
@@ -333,6 +346,19 @@ export function UsagePane(props: { ctx: LocusPluginCtx }) {
       ref={rootRef}
       className="flex flex-col gap-2.5 p-2.5 pb-5 sm:p-3"
     >
+      {/* 1.5.0 同步不可用提示条：数据可能过期（旧快照直读），原因来自 host。
+          样式复用既有 errBar 同一族类（构建期产物已含，不新增 Tailwind 规则）。 */}
+      {sync.state === 'unavailable' && !syncHidden && (
+        <div
+          onClick={() => setSyncHidden(true)}
+          className="mx-0.5 mb-1 cursor-pointer whitespace-pre-wrap break-words rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-panel)] p-2 px-3 text-xs text-[var(--fg-secondary)]"
+        >
+          {'数据可能过期 · 点击关闭\n增量同步不可用：' +
+            (sync.reason ?? '原因未知') +
+            '。以下为上次同步的快照数据。'}
+        </div>
+      )}
+
       {/* Head */}
       <div className="flex flex-wrap items-center gap-2.5 px-0.5 pb-1.5">
         <div className="min-w-[150px] flex-1">

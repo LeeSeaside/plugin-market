@@ -18,7 +18,11 @@
  * 方法面：
  *   usage.summary { days?, all?, provider?, model? }
  *        → { unit: 'day'|'hour', total(含 cacheRate/tps/ttftS/errors/cacheSavings),
- *            daily[](含 errors), providers[], models[](含 tps/ttftS), facets }
+ *            daily[](含 errors), providers[], models[](含 tps/ttftS), facets,
+ *            syncState: 'ok'|'unavailable', syncReason: string|null }
+ *        （1.5.0：syncState/syncReason = 面板加载那次增量同步的结论 —— 失败
+ *         不再静默，面板据此显示「数据可能过期：原因」提示条。只附在 summary
+ *         上：models 返回数组，附加属性过不了 JSON 桥。）
  *   usage.models { all?, provider?, model? } → [{ modelKey, samples, tps, ttftS, updatedAt }]
  *   usage.quota                              → [{ limitId, label, usedFraction, status, resetsAt }]
  */
@@ -39,6 +43,8 @@ let agentDb = null;
 let agentDbPath = null;
 let syncPromise = null;
 let lastSyncAt = 0;
+let lastSyncOk = null; // null = 尚未尝试过；true/false = 最近一次同步结论
+let lastSyncReason = null;
 
 function resolveStatsDbPath(kernelHome) {
   const candidates = [
@@ -93,38 +99,97 @@ function openAgentDb(kernelHome) {
 
 /**
  * 面板加载触发的增量同步：`omp stats --json` 先同步后出数。并发单飞 +
- * 60s 节流；全部候选失败时返回 'unavailable'（直读库快照，不报错）。
+ * 60s 节流。1.5.0 起失败**带原因**返回（bundled exe 缺失 / PATH 无 omp /
+ * spawn 失败 / 内核过旧 / 超时）—— 此前全部静默降级，面板对着旧快照毫无
+ * 标识。节流窗内沿用最近一次结论，不重复 spawn。
  */
 function syncSessions(ompExe, kernelHome) {
-  if (Date.now() - lastSyncAt < SYNC_THROTTLE_MS) return Promise.resolve('throttled');
+  if (Date.now() - lastSyncAt < SYNC_THROTTLE_MS) {
+    return Promise.resolve(
+      lastSyncOk === true
+        ? { ok: true, reason: null }
+        : { ok: false, reason: lastSyncReason ?? '同步尚未完成' },
+    );
+  }
   if (syncPromise) return syncPromise;
-  const candidates = [...new Set([ompExe, 'omp'])].filter(Boolean);
+  const candidates = [];
+  if (ompExe && typeof ompExe === 'string') candidates.push({ exe: ompExe, bundled: true });
+  candidates.push({ exe: 'omp', bundled: false });
   syncPromise = (async () => {
-    for (const exe of candidates) {
-      const ok = await new Promise((resolve) => {
-        try {
-          const child = spawn(exe, ['stats', '--json'], {
-            timeout: SYNC_TIMEOUT_MS,
-            windowsHide: true,
-            stdio: ['ignore', 'ignore', 'ignore'],
-            // 与 chat-service spawn 内核同款：隔离模式下 session 落在同一 home。
-            env: { ...process.env, PI_CODING_AGENT_DIR: path.join(kernelHome, 'agent') },
-          });
-          child.on('close', (code) => resolve(code === 0));
-          child.on('error', () => resolve(false));
-        } catch {
-          resolve(false);
-        }
-      });
-      if (ok) {
+    const reasons = [];
+    for (const cand of candidates) {
+      const r = await trySyncOnce(cand, kernelHome);
+      if (r.ok) {
         lastSyncAt = Date.now();
-        return 'synced';
+        lastSyncOk = true;
+        lastSyncReason = null;
+        return { ok: true, reason: null };
       }
+      reasons.push(r.reason);
     }
-    return 'unavailable';
+    lastSyncOk = false;
+    lastSyncReason = reasons.join('；') || '同步失败';
+    return { ok: false, reason: lastSyncReason };
   })();
   return syncPromise.finally(() => {
     syncPromise = null;
+  });
+}
+
+/** 单候选同步。stdio 只留 stderr 短摘要（供归因）；不抛错，结论式返回。 */
+function trySyncOnce(cand, kernelHome) {
+  return new Promise((resolve) => {
+    if (cand.bundled && !existsSync(cand.exe)) {
+      resolve({ ok: false, reason: 'bundled omp.exe 缺失' });
+      return;
+    }
+    let stderr = '';
+    let child;
+    try {
+      child = spawn(cand.exe, ['stats', '--json'], {
+        timeout: SYNC_TIMEOUT_MS,
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+        // 与 chat-service spawn 内核同款：隔离模式下 session 落在同一 home。
+        env: { ...process.env, PI_CODING_AGENT_DIR: path.join(kernelHome, 'agent') },
+      });
+    } catch (e) {
+      const who = cand.bundled ? 'bundled omp.exe' : 'PATH 中的 omp';
+      resolve({ ok: false, reason: `${who} spawn 失败：${e?.message ?? e}` });
+      return;
+    }
+    child.stderr?.on('data', (d) => {
+      if (stderr.length < 400) stderr += String(d);
+    });
+    child.on('error', (e) => {
+      const who = cand.bundled ? 'bundled omp.exe' : 'PATH 中的 omp';
+      resolve({
+        ok: false,
+        reason:
+          e?.code === 'ENOENT' && !cand.bundled
+            ? 'PATH 中没有 omp'
+            : `${who} spawn 失败：${e?.message ?? e}`,
+      });
+    });
+    child.on('close', (code, signal) => {
+      if (code === 0) {
+        resolve({ ok: true, reason: null });
+        return;
+      }
+      const tail = stderr.trim().slice(0, 160);
+      if (signal) {
+        resolve({ ok: false, reason: `omp stats 超时（${SYNC_TIMEOUT_MS / 1000}s）被终止${tail ? '：' + tail : ''}` });
+        return;
+      }
+      // 非 0 退出：内核过旧（18.3.0 前无 stats 子命令）是最常见归因
+      const unknownCmd = /unknown|unrecognized|invalid|未知命令|无法识别/i.test(stderr);
+      resolve({
+        ok: false,
+        reason: unknownCmd
+          ? `内核版本过旧（omp stats 子命令需内核 18.3.0+）${tail ? '：' + tail : ''}`
+          : `omp stats 退出码 ${code}${tail ? '：' + tail : ''}`,
+      });
+    });
   });
 }
 
@@ -329,13 +394,21 @@ export async function activate(host) {
   return {
     async request(method, params = {}) {
       // summary / models 先触发一次面板级增量同步（节流内直接跳过），
-      // 再读库 —— 同步失败不阻断（降级为上次快照）。
+      // 再读库 —— 同步失败不阻断（降级为上次快照），但结论随 summary 响应
+      // 带回（syncState/syncReason），面板据此显示「数据可能过期」提示条。
+      let sync = null;
       if (method === 'usage.summary' || method === 'usage.models') {
-        await syncSessions(params.ompExe, params.kernelHome).catch(() => 'unavailable');
+        sync = await syncSessions(params.ompExe, params.kernelHome).catch(
+          (e) => ({ ok: false, reason: '同步过程异常：' + String((e && e.message) || e) }),
+        );
       }
       switch (method) {
-        case 'usage.summary':
-          return summaryRequest(params);
+        case 'usage.summary': {
+          const out = summaryRequest(params);
+          out.syncState = sync && sync.ok === false ? 'unavailable' : 'ok';
+          out.syncReason = sync && sync.ok === false ? sync.reason : null;
+          return out;
+        }
         case 'usage.models':
           return modelsRequest(params);
         case 'usage.quota':

@@ -1,9 +1,9 @@
 {
   "id": "com.locus.usage",
   "name": "用量统计",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "apiVersion": 1,
-  "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。1.4.0 新增维度过滤（供应商/模型 gooey 下拉，facets 驱动）、24 小时逐小时桶与「全部」档、区间指标条（缓存命中率 / 生成 TPS / TTFT / 错误数 / 缓存节省）。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。",
+  "description": "随应用分发的用量面板（amicro mono-charts 真实组件版）：recharts 驱动的 KPI 走势卡、逐日成本胶囊柱（可切行列）、GitHub 风格 13 周活跃热力格、限额仪表环、供应商分段环与模型子弹条，motion/recharts 原生动效，宽度全自适应。1.4.0 新增维度过滤（供应商/模型 gooey 下拉，facets 驱动）、24 小时逐小时桶与「全部」档、区间指标条（缓存命中率 / 生成 TPS / TTFT / 错误数 / 缓存节省）。client.js 由 plugins-src/locus-usage 源码工程构建（TS + Tailwind + esbuild 单文件产物，React 复用宿主实例）。数据源 = 内核 stats.db（omp 18.x sessions sync 全量账本，含订阅模型 token 与 API 等价成本）；面板加载时 spawn `omp stats --json` 触发一次增量同步（bundled exe 优先，PATH omp 兜底）；限额仍读 agent.db usage_history。1.5.0：同步失败不再静默 —— host 随 summary 带回 syncState/syncReason（bundled exe 缺失 / PATH 无 omp / spawn 失败 / 内核过旧），面板 unavailable 时顶部显示「数据可能过期：原因」提示条。",
   "entry": {
     "client": "client.js"
   },

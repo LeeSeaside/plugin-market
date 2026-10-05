@@ -2,8 +2,11 @@
 /**
  * plugin-market · index.json 生成器（发布脚本）
  *
- * 用法：node scripts/build-index.mjs [repoRoot]
+ * 用法：node scripts/build-index.mjs [repoRoot] [--no-purge]
  *   repoRoot 默认 = 本脚本上两级（仓库根）。
+ *   --no-purge：只生成 index.json，不做 jsDelivr purge —— 供「仅重算索引、
+ *   尚未 push」的本地重生成用（purge 打在旧内容上毫无意义，发布 = push 后
+ *   再跑本脚本不带该标志）。
  *
  * 行为：扫描仓库根下的一级目录（排除 scripts/ 等），每个目录视为一个插件包：
  *   - 必须有 manifest.json（id 需与目录名一致；version 非空）
@@ -21,7 +24,9 @@ import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const root = process.argv[2] ?? join(here, '..');
+const argv = process.argv.slice(2);
+const NO_PURGE = argv.includes('--no-purge');
+const root = argv.find((a) => !a.startsWith('--')) ?? join(here, '..');
 
 const ID_RE = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/;
 /** 与服务端 REPO_PATH_RE 同款：市场 path（=仓库目录名）禁点号，故目录名
@@ -119,15 +124,21 @@ console.log(`index.json written · ${plugins.length} plugins`);
 
 // ---- jsDelivr 边缘缓存 purge（@main 分支内容有约 12h 缓存，发布后必须刷）----
 // 失败仅警告不阻塞：purge 不通时 jsDelivr 到期也会自行刷新，只是有延迟。
-const GH_BASE = 'https://cdn.jsdelivr.net/gh/LeeSeaside/plugin-market@main';
-const PURGE_BASE = 'https://purge.jsdelivr.net/gh/LeeSeaside/plugin-market@main';
-const purgeTargets = ['index.json', ...plugins.flatMap((p) => p.files.map((f) => `${p.path}/${f.name}`))];
-for (const t of purgeTargets) {
-  try {
-    const res = await fetch(`${PURGE_BASE}/${t}`, { signal: AbortSignal.timeout(10_000) });
-    console.log(`purge ${t}: HTTP ${res.status}`);
-  } catch (e) {
-    console.warn(`purge ${t} 失败（忽略，等待 jsDelivr 自行刷新）: ${e?.cause?.code ?? e?.message ?? e}`);
+// --no-purge 时整段跳过（见文件头用法）：索引本地重生成、还没 push 时，
+// purge 只会打到 CDN 上的旧内容上，属无效操作。
+if (NO_PURGE) {
+  console.log('skip jsDelivr purge（--no-purge：发布 = push 后重跑本脚本，不带该标志）');
+} else {
+  const GH_BASE = 'https://cdn.jsdelivr.net/gh/LeeSeaside/plugin-market@main';
+  const PURGE_BASE = 'https://purge.jsdelivr.net/gh/LeeSeaside/plugin-market@main';
+  const purgeTargets = ['index.json', ...plugins.flatMap((p) => p.files.map((f) => `${p.path}/${f.name}`))];
+  for (const t of purgeTargets) {
+    try {
+      const res = await fetch(`${PURGE_BASE}/${t}`, { signal: AbortSignal.timeout(10_000) });
+      console.log(`purge ${t}: HTTP ${res.status}`);
+    } catch (e) {
+      console.warn(`purge ${t} 失败（忽略，等待 jsDelivr 自行刷新）: ${e?.cause?.code ?? e?.message ?? e}`);
+    }
   }
+  console.log(`jsDelivr 预览: ${GH_BASE}/index.json`);
 }
-console.log(`jsDelivr 预览: ${GH_BASE}/index.json`);
